@@ -20,12 +20,11 @@ public class Agent {
 
         if (loaded) {
             if (gui != null) {
-                System.out.println("[ClickGui] Toggle (in-process)");
                 gui.toggle();
                 return;
             }
             if (guiProcess != null && guiProcess.isAlive()) {
-                System.out.println("[ClickGui] GUI process running. Use Right Shift.");
+                System.out.println("[ClickGui] Already running. Use Right Shift.");
                 return;
             }
         }
@@ -38,16 +37,11 @@ public class Agent {
         new Thread(() -> {
             try {
                 Thread.sleep(300);
-
-                // Try in-process GUI (truly injected into game)
                 if (tryInProcess(inst)) return;
-
-                // Fallback: separate process
                 writeProof("Trying separate process fallback...");
                 tryExternalProcess(args);
-
             } catch (Throwable t) {
-                logError("Init thread", t);
+                logError("Init", t);
             }
         }, "ClickGui-Init").start();
     }
@@ -56,54 +50,42 @@ public class Agent {
         try {
             writeProof("Attempting in-process GUI...");
 
-            // Open java.desktop module for headless reset
             try {
-                Module javaDesktop = java.awt.GraphicsEnvironment.class.getModule();
-                Module ours = Agent.class.getModule();
+                java.lang.Module javaDesktop = java.awt.GraphicsEnvironment.class.getModule();
                 inst.redefineModule(javaDesktop,
                         Set.of(), Map.of(),
-                        Map.of("java.awt", Set.of(ours)),
+                        Map.of("java.awt", Set.of(Agent.class.getModule())),
                         Set.of(), Map.of());
-                writeProof("Module opened OK");
             } catch (Throwable t) {
-                writeProof("Module open failed (non-fatal): " + t.getMessage());
+                writeProof("Module open: " + t.getMessage());
             }
 
-            // Force non-headless
             System.setProperty("java.awt.headless", "false");
             try {
                 Field f = java.awt.GraphicsEnvironment.class.getDeclaredField("headless");
                 f.setAccessible(true);
                 f.set(null, null);
-                writeProof("Headless reset OK");
             } catch (Throwable t) {
-                writeProof("Headless reset failed (non-fatal): " + t.getMessage());
+                writeProof("Headless reset: " + t.getMessage());
             }
 
-            // Initialize AWT toolkit
             try {
-                java.awt.Toolkit tk = java.awt.Toolkit.getDefaultToolkit();
-                writeProof("Toolkit: " + tk.getClass().getName());
+                java.awt.Toolkit.getDefaultToolkit();
             } catch (Throwable t) {
-                writeProof("Toolkit init failed: " + t.getMessage());
+                writeProof("Toolkit failed: " + t.getMessage());
                 return false;
             }
 
-            System.out.println("[ClickGui] Creating overlay...");
-            gui = new ClickGui();
-            writeProof("GUI created OK");
-
-            System.out.println("[ClickGui] Showing overlay...");
+            ModuleManager mgr = new ModuleManager();
+            gui = new ClickGui(mgr);
             gui.show();
-            writeProof("GUI shown OK");
+            writeProof("In-process GUI OK");
 
-            System.out.println("[ClickGui] Starting key hook...");
             System.out.println("[ClickGui] Right Shift = toggle, ESC = close");
-            KeyHook hook = new KeyHook(gui);
-            hook.run();
+            new KeyHook(gui).run();
             return true;
         } catch (Throwable t) {
-            logError("In-process GUI", t);
+            logError("In-process", t);
             gui = null;
             return false;
         }
@@ -112,20 +94,18 @@ public class Agent {
     private static void tryExternalProcess(String jarPath) {
         try {
             if (jarPath == null || jarPath.isEmpty()) {
-                writeProof("ERROR: jar path not provided for external process");
+                writeProof("No jar path for external process");
                 return;
             }
-
             File jarFile = new File(jarPath);
             if (!jarFile.exists()) {
-                writeProof("ERROR: jar not found at " + jarPath);
+                writeProof("Jar not found: " + jarPath);
                 return;
             }
 
             String javaBin = findJava();
             writeProof("External Java: " + javaBin);
 
-            System.out.println("[ClickGui] Launching external GUI...");
             ProcessBuilder pb = new ProcessBuilder(
                 javaBin, "-cp", jarFile.getAbsolutePath(),
                 "com.modloader.ClickGuiApp"
@@ -134,21 +114,15 @@ public class Agent {
             guiProcess = pb.start();
             writeProof("External GUI PID: " + guiProcess.pid());
 
-            System.out.println("[ClickGui] External GUI PID: " + guiProcess.pid());
-            System.out.println("[ClickGui] Right Shift = toggle, ESC = close");
-
-            BufferedReader br = new BufferedReader(
-                    new InputStreamReader(guiProcess.getInputStream()));
+            BufferedReader br = new BufferedReader(new InputStreamReader(guiProcess.getInputStream()));
             String line;
             while ((line = br.readLine()) != null) {
                 System.out.println(line);
                 writeProof("[EXT] " + line);
             }
-
-            int exit = guiProcess.waitFor();
-            writeProof("External GUI exited: " + exit);
+            guiProcess.waitFor();
         } catch (Throwable t) {
-            logError("External process", t);
+            logError("External", t);
         }
     }
 
@@ -158,15 +132,14 @@ public class Agent {
             File f = new File(home, "bin" + File.separator + name);
             if (f.exists()) return f.getAbsolutePath();
         }
-        writeProof("WARNING: java not found in " + home);
         return "javaw.exe";
     }
 
-    private static void logError(String context, Throwable t) {
+    private static void logError(String ctx, Throwable t) {
         String msg = t.getClass().getName() + ": " + t.getMessage();
-        System.out.println("[ClickGui] " + context + " ERROR: " + msg);
+        System.out.println("[ClickGui] " + ctx + " ERROR: " + msg);
         t.printStackTrace();
-        writeProof(context + " ERROR: " + msg);
+        writeProof(ctx + " ERROR: " + msg);
         try {
             java.io.StringWriter sw = new java.io.StringWriter();
             t.printStackTrace(new java.io.PrintWriter(sw));
