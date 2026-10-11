@@ -13,48 +13,48 @@ public class KeyHook implements Runnable {
 
     @Override
     public void run() {
-        System.out.println("[ClickGui] Starting Right Shift listener...");
+        System.out.println("[ClickGui] KeyHook starting...");
 
-        // Use PowerShell + Windows API GetAsyncKeyState for global hotkey
-        // VK_RSHIFT = 0xA1 (161)
+        // VK_RSHIFT = 0xA1 = 161
+        String script = String.join("; ",
+            "Add-Type -TypeDefinition @'",
+            "using System; using System.Runtime.InteropServices;",
+            "public class HK { [DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int k); }",
+            "'@",
+            "$prev = $false",
+            "while($true) {",
+            "  $now = ([HK]::GetAsyncKeyState(0xA1) -band 0x8000) -ne 0",
+            "  if($now -and !$prev) { [Console]::Out.WriteLine('T'); [Console]::Out.Flush() }",
+            "  $prev = $now",
+            "  Start-Sleep -Milliseconds 40",
+            "}"
+        );
+
         try {
-            String psScript =
-                "Add-Type -TypeDefinition '" +
-                "using System; using System.Runtime.InteropServices; " +
-                "public class KS { " +
-                "[DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int vKey); " +
-                "}'; " +
-                "$wasp = $false; " +
-                "while ($true) { " +
-                "  $p = ([KS]::GetAsyncKeyState(0xA1) -band 0x8000) -ne 0; " +
-                "  if ($p -and -not $wasp) { " +
-                "    [Console]::WriteLine('TOGGLE'); " +
-                "    [Console]::Out.Flush(); " +
-                "  } " +
-                "  $wasp = $p; " +
-                "  Start-Sleep -Milliseconds 50 " +
-                "}";
-
             ProcessBuilder pb = new ProcessBuilder(
-                "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psScript
+                "powershell.exe", "-NoProfile", "-NoLogo",
+                "-ExecutionPolicy", "Bypass", "-Command", script
             );
             pb.redirectErrorStream(true);
             Process proc = pb.start();
 
-            System.out.println("[ClickGui] Key listener ACTIVE (Right Shift)");
+            System.out.println("[ClickGui] KeyHook ACTIVE: Right Shift to toggle");
 
-            BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+            BufferedReader br = new BufferedReader(new InputStreamReader(proc.getInputStream()));
             String line;
-            while ((line = reader.readLine()) != null) {
-                if (line.trim().equals("TOGGLE")) {
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.equals("T")) {
+                    System.out.println("[ClickGui] Right Shift pressed");
                     gui.toggle();
                 }
             }
 
-            System.out.println("[ClickGui] Key listener stopped");
+            System.out.println("[ClickGui] KeyHook process ended");
         } catch (Exception e) {
-            System.out.println("[ClickGui] Key listener error: " + e.getMessage());
-            System.out.println("[ClickGui] Use test.cmd [1] to toggle instead");
+            System.out.println("[ClickGui] KeyHook failed: " + e.getMessage());
+            System.out.println("[ClickGui] Right Shift won't work.");
+            System.out.println("[ClickGui] Use test.cmd [1] to toggle.");
         }
     }
 }
