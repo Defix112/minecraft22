@@ -1,50 +1,52 @@
 @echo off
-chcp 65001 >nul 2>&1
+chcp 437 >nul 2>&1
 title Minecraft Mod Loader
 color 0a
 setlocal enabledelayedexpansion
 
 set "SCRIPT_DIR=%~dp0"
 set "MC_PID="
-set "INJECTED=0"
+set "INSTALLED=0"
+set "MODS_DIR="
 
 :menu
 cls
 echo.
-echo  ╔══════════════════════════════════════════╗
-echo  ║        MINECRAFT MOD LOADER v1.0         ║
-echo  ╠══════════════════════════════════════════╣
+echo  ==========================================
+echo        MINECRAFT MOD LOADER v1.0
+echo  ==========================================
 if defined MC_PID (
-    if "!INJECTED!"=="1" (
-        echo  ║  Статус: Мод загружен в Minecraft       ║
-        echo  ║  PID: %MC_PID%                          ║
-        echo  ║  Right Shift - открыть/закрыть ClickGui ║
+    if "!INSTALLED!"=="1" (
+        echo   Status: Mod installed!
+        echo   PID: %MC_PID%
+        echo   Restart Minecraft to activate.
+        echo   Right Shift = open/close ClickGui
     ) else (
-        echo  ║  Статус: Minecraft найден ^(PID: %MC_PID%^)  ║
+        echo   Status: Minecraft found (PID: %MC_PID%)
     )
 ) else (
-    echo  ║  Статус: Minecraft не обнаружен           ║
+    echo   Status: Minecraft not detected
 )
-echo  ╠══════════════════════════════════════════╣
+echo  ------------------------------------------
 if not defined MC_PID (
-    echo  ║  [1] Найти процесс Minecraft             ║
-) else if "!INJECTED!"=="0" (
-    echo  ║  [1] Загрузить мод в Minecraft            ║
+    echo   [1] Find Minecraft process
+) else if "!INSTALLED!"=="0" (
+    echo   [1] Install mod into Minecraft
 ) else (
-    echo  ║  [i] Мод уже загружен!                    ║
+    echo   [i] Mod already installed!
 )
-echo  ║  [0] Выход                               ║
-echo  ╚══════════════════════════════════════════╝
+echo   [0] Exit
+echo  ==========================================
 echo.
 
-set /p "choice=  Выберите действие: "
+set /p "choice=  Select: "
 
 if "%choice%"=="0" goto :eof
 if "%choice%"=="1" (
     if not defined MC_PID (
         goto :find_mc
-    ) else if "!INJECTED!"=="0" (
-        goto :inject
+    ) else if "!INSTALLED!"=="0" (
+        goto :install_mod
     )
 )
 goto :menu
@@ -52,7 +54,7 @@ goto :menu
 :find_mc
 cls
 echo.
-echo   Поиск процесса Minecraft...
+echo   Searching for Minecraft...
 echo.
 
 for /f "tokens=2" %%a in ('tasklist /fi "imagename eq javaw.exe" /fo list 2^>nul ^| findstr /i "PID"') do (
@@ -66,69 +68,76 @@ if not defined MC_PID (
 )
 
 if defined MC_PID (
-    echo   [+] Minecraft найден! PID: %MC_PID%
-    echo.
-    echo   Нажмите любую клавишу для продолжения...
-    pause >nul
+    echo   [+] Minecraft found! PID: %MC_PID%
 ) else (
-    echo   [-] Minecraft не найден.
-    echo   Убедитесь, что Minecraft запущен.
-    echo.
-    echo   Нажмите любую клавишу для продолжения...
-    pause >nul
+    echo   [-] Minecraft not found.
+    echo   Make sure Minecraft is running.
 )
+echo.
+pause
 goto :menu
 
-:inject
+:install_mod
 cls
 echo.
-echo   Подготовка к загрузке мода...
+echo   Installing mod...
 echo.
 
-:: Ищем java и tools.jar для Attach API
-set "JAVA_EXE="
-where java >nul 2>&1
-if %errorlevel%==0 (
-    set "JAVA_EXE=java"
-) else if exist "%JAVA_HOME%\bin\java.exe" (
-    set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
-)
+:: Find .minecraft/mods folder
+set "MODS_DIR=%APPDATA%\.minecraft\mods"
 
-if not defined JAVA_EXE (
-    echo   [-] Java не найдена в PATH.
-    echo   Установите JDK и добавьте в PATH.
-    pause >nul
+if not exist "%APPDATA%\.minecraft" (
+    echo   [-] .minecraft folder not found!
+    echo   Make sure Minecraft is installed.
+    pause
     goto :menu
 )
 
-:: Компилируем если нужно
-if not exist "%SCRIPT_DIR%build\agent.jar" (
-    echo   Компиляция мода...
-    call "%SCRIPT_DIR%build.cmd"
-    if not exist "%SCRIPT_DIR%build\agent.jar" (
-        echo   [-] Ошибка компиляции.
-        pause >nul
-        goto :menu
+if not exist "%MODS_DIR%" (
+    echo   Creating mods folder...
+    mkdir "%MODS_DIR%"
+)
+
+:: Check if Fabric Loader is installed
+if not exist "%APPDATA%\.minecraft\versions\fabric-loader-*" (
+    echo   [!] WARNING: Fabric Loader may not be installed.
+    echo   Download it from: https://fabricmc.net/use/installer/
+    echo.
+)
+
+:: Copy mod jar
+if exist "%SCRIPT_DIR%build\libs\clickgui-mod-1.0.0.jar" (
+    copy /y "%SCRIPT_DIR%build\libs\clickgui-mod-1.0.0.jar" "%MODS_DIR%\" >nul
+    echo   [+] Mod copied to mods folder!
+    set "INSTALLED=1"
+) else if exist "%SCRIPT_DIR%clickgui-mod-1.0.0.jar" (
+    copy /y "%SCRIPT_DIR%clickgui-mod-1.0.0.jar" "%MODS_DIR%\" >nul
+    echo   [+] Mod copied to mods folder!
+    set "INSTALLED=1"
+) else (
+    echo   [-] Mod jar not found!
+    echo   Looking for: clickgui-mod-1.0.0.jar
+    echo.
+    echo   Building mod...
+    cd /d "%SCRIPT_DIR%"
+    call gradlew.bat build >nul 2>&1
+    if exist "%SCRIPT_DIR%build\libs\clickgui-mod-1.0.0.jar" (
+        copy /y "%SCRIPT_DIR%build\libs\clickgui-mod-1.0.0.jar" "%MODS_DIR%\" >nul
+        echo   [+] Mod built and copied!
+        set "INSTALLED=1"
+    ) else (
+        echo   [-] Build failed. Make sure JDK is installed.
     )
 )
 
-echo   Загрузка мода в Minecraft (PID: %MC_PID%)...
-echo.
-
-"%JAVA_EXE%" -cp "%SCRIPT_DIR%build\agent.jar" com.modloader.Injector %MC_PID% "%SCRIPT_DIR%build\agent.jar"
-
-if %errorlevel%==0 (
-    set "INJECTED=1"
+if "!INSTALLED!"=="1" (
     echo.
-    echo   [+] Мод успешно загружен!
-    echo   [+] Нажмите Right Shift в игре для открытия ClickGui
-) else (
-    echo.
-    echo   [-] Ошибка загрузки мода.
-    echo   Попробуйте запустить от имени администратора.
+    echo   ==========================================
+    echo   Restart Minecraft to load the mod!
+    echo   In game press Right Shift for ClickGui.
+    echo   ==========================================
 )
 
 echo.
-echo   Нажмите любую клавишу для продолжения...
-pause >nul
+pause
 goto :menu
