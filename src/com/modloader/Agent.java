@@ -26,24 +26,36 @@ public class Agent {
 
         new Thread(() -> {
             try {
-                // small delay to let things settle
-                Thread.sleep(300);
+                Thread.sleep(500);
+
+                // force AWT init
+                System.out.println("[ClickGui] Init AWT...");
+                System.setProperty("java.awt.headless", "false");
+                writeProof("AWT init OK");
 
                 System.out.println("[ClickGui] Creating GUI...");
                 gui = new ClickGui();
-                System.out.println("[ClickGui] GUI created, showing...");
-                gui.show();
-                System.out.println("[ClickGui] GUI visible!");
+                writeProof("GUI created");
 
-                writeProof("GUI opened OK");
+                System.out.println("[ClickGui] Showing GUI...");
+                gui.show();
+                writeProof("GUI shown OK");
 
                 System.out.println("[ClickGui] Starting key hook...");
                 KeyHook hook = new KeyHook(gui);
                 hook.run();
             } catch (Throwable t) {
-                System.out.println("[ClickGui] ERROR: " + t.getMessage());
+                String err = t.getClass().getName() + ": " + t.getMessage();
+                System.out.println("[ClickGui] ERROR: " + err);
                 t.printStackTrace();
-                writeProof("ERROR: " + t.getMessage());
+                writeProof("ERROR: " + err);
+
+                // stacktrace to proof file
+                try {
+                    java.io.StringWriter sw = new java.io.StringWriter();
+                    t.printStackTrace(new java.io.PrintWriter(sw));
+                    writeProof(sw.toString());
+                } catch (Exception ignored) {}
             }
         }, "ClickGui").start();
     }

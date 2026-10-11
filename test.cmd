@@ -165,44 +165,37 @@ del /f "%TEMP%\clickgui_log.txt" >nul 2>&1
 :: Run injector
 "!JAVA_EXE!" --add-modules jdk.attach --add-opens java.base/java.lang=ALL-UNNAMED -cp "!AGENT_JAR!" com.modloader.Injector !MC_PID! "!AGENT_JAR!"
 
-if !errorlevel!==0 (
-    set "INJECTED=1"
+if !errorlevel! neq 0 goto :inject_fail
 
-    :: Wait a moment and check proof file
-    timeout /t 2 /nobreak >nul
+set "INJECTED=1"
+timeout /t 2 /nobreak >nul
 
-    if exist "%TEMP%\clickgui_log.txt" (
-        echo.
-        echo   [+] SUCCESS! Agent confirmed loaded.
-        echo.
-        type "%TEMP%\clickgui_log.txt"
-    ) else (
-        echo.
-        echo   [+] Agent sent to Minecraft.
-        echo   If ClickGui does not appear:
-        echo   - Check Minecraft console for [ClickGui] messages
-    )
-
+if exist "%TEMP%\clickgui_log.txt" (
     echo.
-    echo  ==========================================
-    echo   ClickGui should be visible on screen!
-    echo   RIGHT SHIFT = show/hide
-    echo   ESC = close (when focused)
-    echo   Drag to move the window
-    echo  ==========================================
-) else (
+    echo   [+] SUCCESS! Agent confirmed loaded.
     echo.
-    echo   [-] INJECTION FAILED
-    echo.
-    echo   Fixes:
-    echo   1. Right-click test.cmd - Run as Administrator
-    echo   2. Make sure Minecraft is running
-    echo   3. Install JDK 21: https://adoptium.net/
-    echo   4. Close other Java programs
-    echo.
-    echo   If Minecraft uses a different Java version,
-    echo   both must be the same (JDK 21).
+    type "%TEMP%\clickgui_log.txt"
 )
+
+echo.
+echo  ==========================================
+echo   ClickGui should be visible on screen!
+echo   RIGHT SHIFT = show/hide
+echo   ESC = close, drag to move
+echo  ==========================================
+goto :inject_done
+
+:inject_fail
+echo.
+echo   [-] INJECTION FAILED
+echo.
+echo   Fixes:
+echo   1. Right-click test.cmd - Run as Administrator
+echo   2. Make sure Minecraft is running
+echo   3. Install JDK 21: https://adoptium.net/
+echo   4. Close other Java programs
+
+:inject_done
 
 echo.
 pause
