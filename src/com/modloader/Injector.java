@@ -28,7 +28,7 @@ public class Injector {
             System.out.println("  Attaching...");
             VirtualMachine vm = VirtualMachine.attach(pid);
             System.out.println("  Attached OK. Loading agent...");
-            vm.loadAgent(agentPath);
+            vm.loadAgent(agentPath, agentPath);
             System.out.println("  Agent loaded OK.");
             vm.detach();
             System.out.println("  Done.");
