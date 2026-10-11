@@ -8,6 +8,11 @@ set "SCRIPT_DIR=%~dp0"
 set "MC_PID="
 set "INJECTED=0"
 
+:: Find Java immediately
+set "JAVA_EXE="
+where java >nul 2>&1 && set "JAVA_EXE=java"
+if not defined JAVA_EXE if exist "%JAVA_HOME%\bin\java.exe" set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+
 :menu
 cls
 echo.
@@ -15,12 +20,21 @@ echo  ==========================================
 echo         CLICKGUI INJECTOR v1.0
 echo  ==========================================
 echo.
+if not defined JAVA_EXE (
+    echo   [!!] Java NOT FOUND!
+    echo   Install JDK from: https://adoptium.net/
+    echo   Then restart this program.
+    echo.
+    pause
+    goto :eof
+)
 if "!INJECTED!"=="1" (
     echo   [OK] Injected into Minecraft!
-    echo   [OK] Press Right Shift in game
-    echo        to open/close ClickGui
+    echo   ClickGui should be visible.
+    echo   Right Shift = toggle ClickGui
+    echo   ESC = close ClickGui
 ) else if defined MC_PID (
-    echo   [OK] Minecraft found - PID: !MC_PID!
+    echo   [OK] Minecraft PID: !MC_PID!
 ) else (
     echo   Minecraft not detected
 )
@@ -29,9 +43,9 @@ echo  ------------------------------------------
 if not defined MC_PID (
     echo   [1] Find Minecraft process
 ) else if "!INJECTED!"=="0" (
-    echo   [1] Inject ClickGui into Minecraft
+    echo   [1] INJECT ClickGui into Minecraft
 ) else (
-    echo   [1] Re-inject (toggle ClickGui)
+    echo   [1] Toggle ClickGui (re-inject)
 )
 echo   [0] Exit
 echo  ==========================================
@@ -57,36 +71,38 @@ echo.
 
 set "MC_PID="
 
-:: Method 1: use Java Attach API to find Minecraft JVM
-set "JAVA_EXE="
-where java >nul 2>&1 && set "JAVA_EXE=java"
-if not defined JAVA_EXE if exist "%JAVA_HOME%\bin\java.exe" set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
-
-if not defined JAVA_EXE (
-    echo   [-] Java not found!
-    echo   Install JDK 21 and add to PATH.
-    echo   Download: https://adoptium.net/
-    pause
-    goto :menu
+:: Use jps to find Java processes
+for /f "tokens=1,2*" %%a in ('jps -l 2^>nul') do (
+    set "JPS_PID=%%a"
+    set "JPS_NAME=%%b"
+    echo     PID=%%a  %%b
+    if not "%%b"=="" (
+        echo "%%b" | findstr /i "minecraft net.minecraft fabricloader cpw.mods launchwrapper forge optifine tlauncher" >nul 2>&1
+        if !errorlevel!==0 (
+            set "MC_PID=%%a"
+        )
+    )
 )
 
-:: Method 2: tasklist fallback
-for /f "tokens=2" %%a in ('tasklist /fi "imagename eq javaw.exe" /fo list 2^>nul ^| findstr /i "PID"') do (
-    set "MC_PID=%%a"
-)
+:: Fallback: tasklist
 if not defined MC_PID (
-    for /f "tokens=2" %%a in ('tasklist /fi "imagename eq java.exe" /fo list 2^>nul ^| findstr /i "PID"') do (
-        set "MC_PID=%%a"
+    echo.
+    echo   Trying tasklist fallback...
+    for /f "tokens=2" %%a in ('tasklist /fi "imagename eq javaw.exe" /fo list 2^>nul ^| findstr /i "PID"') do (
+        if not defined MC_PID set "MC_PID=%%a"
     )
 )
 
 if defined MC_PID (
+    echo.
     echo   [+] Minecraft found! PID: !MC_PID!
     echo.
-    echo   Press 1 again to inject ClickGui.
+    echo   Now press 1 to inject ClickGui.
 ) else (
+    echo.
     echo   [-] Minecraft not found.
-    echo   Start Minecraft first, then try again.
+    echo   1. Start Minecraft first
+    echo   2. Then run this program again
 )
 echo.
 pause
@@ -103,8 +119,7 @@ if not exist "%SCRIPT_DIR%build\agent.jar" (
     call "%SCRIPT_DIR%build.cmd"
     echo.
     if not exist "%SCRIPT_DIR%build\agent.jar" (
-        echo   [-] Build failed!
-        echo   Make sure JDK is installed.
+        echo   [-] Build failed! Make sure JDK is installed.
         pause
         goto :menu
     )
@@ -113,27 +128,30 @@ if not exist "%SCRIPT_DIR%build\agent.jar" (
 echo   Injecting into Minecraft (PID: !MC_PID!)...
 echo.
 
-"%JAVA_EXE%" --add-modules jdk.attach -cp "%SCRIPT_DIR%build\agent.jar" com.modloader.Injector !MC_PID! "%SCRIPT_DIR%build\agent.jar"
+"!JAVA_EXE!" --add-modules jdk.attach --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.lang.reflect=ALL-UNNAMED -cp "%SCRIPT_DIR%build\agent.jar" com.modloader.Injector !MC_PID! "%SCRIPT_DIR%build\agent.jar"
 
-if %errorlevel%==0 (
+if !errorlevel!==0 (
     set "INJECTED=1"
     echo.
     echo  ==========================================
     echo   [+] INJECTED SUCCESSFULLY!
     echo.
-    echo   Go back to Minecraft and press
-    echo   RIGHT SHIFT to open ClickGui.
+    echo   ClickGui should now be VISIBLE
+    echo   on top of Minecraft!
     echo.
-    echo   Press RIGHT SHIFT again to close it.
+    echo   RIGHT SHIFT = toggle ClickGui
+    echo   ESC = close ClickGui
+    echo   You can drag the window to move it.
     echo  ==========================================
 ) else (
     echo.
     echo   [-] Injection failed!
     echo.
-    echo   Possible fixes:
-    echo   - Run this as Administrator
-    echo   - Make sure Minecraft is running
-    echo   - Both must use same Java version
+    echo   Try these fixes:
+    echo   1. Right-click test.cmd - Run as Administrator
+    echo   2. Make sure Minecraft is running
+    echo   3. Close other Java programs
+    echo   4. Use same Java version as Minecraft
 )
 
 echo.
