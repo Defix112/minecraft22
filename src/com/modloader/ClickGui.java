@@ -10,7 +10,6 @@ public class ClickGui {
     private volatile boolean visible = false;
 
     public ClickGui() {
-        // must create on EDT
         try {
             if (SwingUtilities.isEventDispatchThread()) {
                 build();
@@ -20,107 +19,169 @@ public class ClickGui {
         } catch (Exception e) {
             System.out.println("[ClickGui] invokeAndWait failed, trying invokeLater");
             SwingUtilities.invokeLater(this::build);
-            try { Thread.sleep(1000); } catch (Exception ignored) {}
+            try { Thread.sleep(1500); } catch (Exception ignored) {}
         }
     }
 
     private void build() {
-        System.out.println("[ClickGui] Building frame...");
+        System.out.println("[ClickGui] Building overlay...");
 
-        frame = new JFrame("ClickGui v1.0");
-        frame.setSize(480, 370);
-        frame.setLocationRelativeTo(null);
-        frame.setAlwaysOnTop(true);
+        frame = new JFrame();
         frame.setUndecorated(true);
+        frame.setAlwaysOnTop(true);
+        frame.setType(Window.Type.UTILITY);
         frame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
+
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        frame.setSize(screen.width, screen.height);
+        frame.setLocation(0, 0);
+
+        boolean transparent = false;
+        try {
+            GraphicsDevice gd = GraphicsEnvironment.getLocalGraphicsEnvironment()
+                    .getDefaultScreenDevice();
+            if (gd.isWindowTranslucencySupported(
+                    GraphicsDevice.WindowTranslucency.PERPIXEL_TRANSLUCENT)) {
+                frame.setBackground(new Color(0, 0, 0, 0));
+                transparent = true;
+            }
+        } catch (Exception e) {
+            System.out.println("[ClickGui] Transparency check failed: " + e.getMessage());
+        }
+
+        final boolean isTransparent = transparent;
 
         JPanel panel = new JPanel(null) {
             @Override
             protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
                 Graphics2D g2 = (Graphics2D) g;
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                        RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
                 int w = getWidth(), h = getHeight();
 
-                // header
-                g2.setColor(new Color(20, 20, 38));
-                g2.fillRect(0, 0, w, 36);
-                g2.setColor(new Color(80, 130, 255));
-                g2.setFont(new Font("Arial", Font.BOLD, 16));
-                g2.drawString("ClickGui", 14, 24);
-                g2.setColor(new Color(100, 100, 130));
-                g2.setFont(new Font("Arial", Font.PLAIN, 11));
-                g2.drawString("Right Shift = toggle | ESC = close", 120, 24);
+                if (isTransparent) {
+                    g2.setComposite(AlphaComposite.Clear);
+                    g2.fillRect(0, 0, w, h);
+                    g2.setComposite(AlphaComposite.SrcOver);
+                    g2.setColor(new Color(0, 0, 0, 100));
+                    g2.fillRect(0, 0, w, h);
+                } else {
+                    g2.setColor(new Color(8, 8, 16));
+                    g2.fillRect(0, 0, w, h);
+                }
 
-                // accent line
-                g2.setColor(new Color(80, 130, 255));
-                g2.fillRect(0, 36, w, 2);
+                int pw = 520, ph = 370;
+                int px = (w - pw) / 2, py = (h - ph) / 2;
 
-                // categories
+                g2.setColor(new Color(0, 0, 0, 60));
+                g2.fillRoundRect(px + 4, py + 4, pw, ph, 10, 10);
+
+                g2.setColor(new Color(14, 14, 28, 245));
+                g2.fillRoundRect(px, py, pw, ph, 10, 10);
+
+                g2.setColor(new Color(20, 20, 38, 250));
+                g2.fillRoundRect(px, py, pw, 38, 10, 10);
+                g2.fillRect(px, py + 28, pw, 10);
+
+                GradientPaint grad = new GradientPaint(
+                        px, py + 38, new Color(80, 130, 255),
+                        px + pw, py + 38, new Color(140, 80, 255));
+                g2.setPaint(grad);
+                g2.fillRect(px, py + 38, pw, 2);
+
+                g2.setColor(new Color(80, 140, 255));
+                g2.setFont(new Font("Segoe UI", Font.BOLD, 16));
+                g2.drawString("ClickGui", px + 14, py + 25);
+
+                g2.setColor(new Color(85, 85, 115));
+                g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+                g2.drawString("RShift = toggle  |  ESC = close", px + 130, py + 25);
+
+                Point mouse = getMousePosition();
+
+                int cbx = px + pw - 30, cby = py + 10;
+                boolean hoverClose = mouse != null
+                        && mouse.x >= cbx && mouse.x <= cbx + 20
+                        && mouse.y >= cby && mouse.y <= cby + 20;
+                g2.setColor(hoverClose ? new Color(255, 60, 60) : new Color(100, 50, 50));
+                g2.setFont(new Font("Segoe UI", Font.BOLD, 14));
+                g2.drawString("X", cbx + 4, cby + 15);
+
                 String[] names = {"Combat", "Movement", "Render", "Player", "World", "Misc"};
                 Color[] cols = {
-                    new Color(255, 80, 80), new Color(80, 255, 80),
-                    new Color(80, 255, 255), new Color(255, 255, 80),
-                    new Color(255, 160, 80), new Color(180, 80, 255)
+                    new Color(255, 75, 75), new Color(75, 255, 120),
+                    new Color(75, 200, 255), new Color(255, 230, 75),
+                    new Color(255, 150, 75), new Color(170, 75, 255)
                 };
 
-                int y = 48;
-                Point mouse = getMousePosition();
+                int cy = py + 50;
                 for (int i = 0; i < names.length; i++) {
-                    boolean hover = mouse != null && mouse.y >= y && mouse.y < y + 44
-                            && mouse.x >= 10 && mouse.x <= w - 10;
+                    int cardX = px + 10;
+                    int cardW = pw - 20;
+                    int cardH = 46;
 
-                    g2.setColor(hover ? new Color(30, 30, 48) : new Color(22, 22, 36));
-                    g2.fillRoundRect(10, y, w - 20, 44, 6, 6);
+                    boolean hover = mouse != null
+                            && mouse.x >= cardX && mouse.x <= cardX + cardW
+                            && mouse.y >= cy && mouse.y < cy + cardH;
+
+                    g2.setColor(hover ? new Color(30, 30, 50, 235) : new Color(20, 20, 36, 220));
+                    g2.fillRoundRect(cardX, cy, cardW, cardH, 6, 6);
 
                     g2.setColor(cols[i]);
-                    g2.fillRect(10, y, 3, 44);
+                    g2.fillRoundRect(cardX, cy, 4, cardH, 2, 2);
+
+                    g2.setColor(cols[i]);
+                    g2.fillOval(cardX + 16, cy + 14, 8, 8);
 
                     g2.setColor(Color.WHITE);
-                    g2.setFont(new Font("Arial", Font.BOLD, 14));
-                    g2.drawString(names[i], 22, y + 18);
+                    g2.setFont(new Font("Segoe UI", Font.BOLD, 14));
+                    g2.drawString(names[i], cardX + 34, cy + 20);
 
-                    g2.setColor(new Color(90, 90, 110));
-                    g2.setFont(new Font("Arial", Font.PLAIN, 11));
-                    g2.drawString("0 modules", 22, y + 35);
-                    g2.drawString(">", w - 28, y + 26);
+                    g2.setColor(new Color(75, 75, 100));
+                    g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+                    g2.drawString("0 modules", cardX + 34, cy + 37);
 
-                    y += 50;
+                    g2.setColor(hover ? new Color(130, 130, 170) : new Color(60, 60, 90));
+                    g2.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+                    g2.drawString("▶", cardX + cardW - 22, cy + 28);
+
+                    cy += 52;
                 }
+
+                g2.setColor(new Color(50, 50, 75));
+                g2.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+                g2.drawString("v1.0", px + pw - 35, py + ph - 8);
             }
         };
-        panel.setBackground(new Color(14, 14, 26));
+        panel.setOpaque(false);
         panel.setFocusable(true);
 
-        // drag to move
-        final int[] dx = {0}, dy = {0};
         panel.addMouseListener(new MouseAdapter() {
             public void mousePressed(MouseEvent e) {
-                dx[0] = e.getX();
-                dy[0] = e.getY();
-            }
-        });
-        panel.addMouseMotionListener(new MouseMotionAdapter() {
-            public void mouseDragged(MouseEvent e) {
-                frame.setLocation(frame.getX() + e.getX() - dx[0],
-                                  frame.getY() + e.getY() - dy[0]);
+                int w = panel.getWidth(), h = panel.getHeight();
+                int pw = 520;
+                int px = (w - pw) / 2, py = (h - 370) / 2;
+                int cbx = px + pw - 30, cby = py + 10;
+                if (e.getX() >= cbx && e.getX() <= cbx + 20
+                        && e.getY() >= cby && e.getY() <= cby + 20) {
+                    hide();
+                }
             }
         });
 
-        // ESC to hide
         panel.addKeyListener(new KeyAdapter() {
             public void keyPressed(KeyEvent e) {
                 if (e.getKeyCode() == KeyEvent.VK_ESCAPE) hide();
             }
         });
 
-        // repaint timer
-        new Timer(80, e -> { if (frame.isVisible()) panel.repaint(); }).start();
+        new Timer(50, e -> { if (frame.isVisible()) panel.repaint(); }).start();
 
         frame.setContentPane(panel);
-        System.out.println("[ClickGui] Frame built OK");
+        System.out.println("[ClickGui] Overlay built OK (transparent=" + transparent + ")");
     }
 
     public void show() {
@@ -130,6 +191,7 @@ public class ClickGui {
             frame.setVisible(true);
             frame.toFront();
             frame.requestFocus();
+            frame.getContentPane().requestFocusInWindow();
             System.out.println("[ClickGui] SHOWN");
         });
     }
