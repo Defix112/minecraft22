@@ -1,4 +1,3 @@
 build/
-.gradle/
 *.class
-run/
+.gradle/
