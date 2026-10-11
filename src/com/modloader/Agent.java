@@ -5,40 +5,33 @@ import java.lang.instrument.Instrumentation;
 public class Agent {
 
     private static volatile boolean loaded = false;
-    private static volatile Instrumentation savedInst;
 
     public static void agentmain(String args, Instrumentation inst) {
-        savedInst = inst;
-
         if (loaded) {
-            System.out.println("[ClickGui] Already loaded, toggling...");
-            ClickGui.getInstance().toggle();
+            System.out.println("[ClickGui] Re-inject: toggling GUI");
+            ClickGui gui = ClickGui.getInstance();
+            if (gui != null) gui.toggle();
             return;
         }
-
         loaded = true;
-        System.out.println("[ClickGui] ========================================");
-        System.out.println("[ClickGui] Agent injected into Minecraft!");
-        System.out.println("[ClickGui] ========================================");
 
-        // open GUI immediately so user sees it works
-        Thread guiThread = new Thread(() -> {
+        System.out.println("[ClickGui] ============================");
+        System.out.println("[ClickGui] Injected successfully!");
+        System.out.println("[ClickGui] ============================");
+
+        new Thread(() -> {
             try {
-                Thread.sleep(300);
-                System.out.println("[ClickGui] Opening ClickGui...");
+                Thread.sleep(200);
                 ClickGui gui = ClickGui.getInstance();
-                gui.toggle(); // show immediately
+                gui.show();
+                System.out.println("[ClickGui] GUI opened!");
+                System.out.println("[ClickGui] Right Shift = toggle");
 
-                // start key listener in background
-                System.out.println("[ClickGui] Starting key listener...");
-                KeyHook hook = new KeyHook(gui, inst);
-                hook.run(); // blocks forever
+                new KeyHook(gui).run();
             } catch (Throwable t) {
-                System.out.println("[ClickGui] FATAL ERROR:");
+                System.out.println("[ClickGui] ERROR: " + t);
                 t.printStackTrace(System.out);
             }
-        }, "ClickGui-Main");
-        guiThread.setDaemon(true);
-        guiThread.start();
+        }, "ClickGui").start();
     }
 }

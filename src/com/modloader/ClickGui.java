@@ -2,7 +2,6 @@ package com.modloader;
 
 import java.awt.*;
 import java.awt.event.*;
-import java.awt.geom.RoundRectangle2D;
 import javax.swing.*;
 
 public class ClickGui {
@@ -24,134 +23,127 @@ public class ClickGui {
 
     private ClickGui() {
         try {
-            SwingUtilities.invokeAndWait(this::createGui);
-            System.out.println("[ClickGui] GUI created successfully");
+            SwingUtilities.invokeAndWait(this::build);
         } catch (Exception e) {
-            System.out.println("[ClickGui] GUI creation error: " + e.getMessage());
+            System.out.println("[ClickGui] Failed to create GUI: " + e);
             e.printStackTrace(System.out);
         }
     }
 
-    private void createGui() {
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception ignored) {}
-
-        frame = new JFrame("ClickGui");
+    private void build() {
+        frame = new JFrame();
+        frame.setTitle("ClickGui");
         frame.setUndecorated(true);
-        frame.setSize(520, 380);
+        frame.setSize(480, 360);
         frame.setLocationRelativeTo(null);
         frame.setAlwaysOnTop(true);
-        frame.setType(Window.Type.UTILITY);
+        frame.setResizable(false);
 
-        // make it semi-transparent
-        frame.setBackground(new Color(0, 0, 0, 0));
+        // dark background - no transparency tricks
+        JPanel panel = new JPanel(null) {
+            final String[] cats = {"Combat", "Movement", "Render", "Player", "World", "Misc"};
+            final Color[] accents = {
+                new Color(255, 85, 85),
+                new Color(85, 255, 85),
+                new Color(85, 255, 255),
+                new Color(255, 255, 85),
+                new Color(255, 153, 85),
+                new Color(170, 85, 255)
+            };
 
-        JPanel mainPanel = new JPanel() {
             @Override
             protected void paintComponent(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g.create();
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g;
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-                // background
-                g2.setColor(new Color(15, 15, 25, 235));
-                g2.fill(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 12, 12));
+                // header
+                g2.setColor(new Color(20, 20, 35));
+                g2.fillRect(0, 0, getWidth(), 38);
 
-                // border
-                g2.setColor(new Color(90, 120, 255, 200));
-                g2.setStroke(new BasicStroke(2));
-                g2.draw(new RoundRectangle2D.Float(1, 1, getWidth() - 2, getHeight() - 2, 12, 12));
-
-                // header bar
-                g2.setColor(new Color(25, 25, 45));
-                g2.fillRoundRect(0, 0, getWidth(), 40, 12, 12);
-                g2.fillRect(0, 28, getWidth(), 12);
-
-                // title
                 g2.setColor(new Color(90, 140, 255));
-                g2.setFont(new Font("Segoe UI", Font.BOLD, 18));
-                g2.drawString("ClickGui", 16, 27);
+                g2.setFont(new Font("Segoe UI", Font.BOLD, 17));
+                g2.drawString("ClickGui", 14, 25);
 
-                // hint
-                g2.setColor(new Color(100, 100, 140));
+                g2.setColor(new Color(90, 90, 120));
                 g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-                g2.drawString("RShift / ESC to close | drag to move", 110, 27);
+                g2.drawString("Right Shift = toggle | drag to move", 120, 25);
 
-                // separator
-                g2.setColor(new Color(90, 120, 255, 60));
-                g2.fillRect(10, 42, getWidth() - 20, 1);
+                // line
+                g2.setColor(new Color(70, 100, 255, 120));
+                g2.fillRect(0, 38, getWidth(), 2);
 
                 // categories
-                String[] cats = {"Combat", "Movement", "Render", "Player", "World", "Misc"};
-                int[] colors = {0xFFFF5555, 0xFF55FF55, 0xFF55FFFF, 0xFFFFFF55, 0xFFFF9955, 0xFFAA55FF};
-
-                int y = 55;
+                int y = 50;
+                Point mouse = getMousePosition();
                 for (int i = 0; i < cats.length; i++) {
-                    boolean hovered = false;
-                    Point mouse = getMousePosition();
-                    if (mouse != null) {
-                        hovered = mouse.x >= 12 && mouse.x <= getWidth() - 12
-                                && mouse.y >= y && mouse.y <= y + 44;
-                    }
+                    boolean hovered = mouse != null
+                            && mouse.x >= 10 && mouse.x <= getWidth() - 10
+                            && mouse.y >= y && mouse.y <= y + 42;
 
-                    g2.setColor(hovered ? new Color(35, 35, 55) : new Color(22, 22, 38));
-                    g2.fillRoundRect(12, y, getWidth() - 24, 44, 8, 8);
+                    g2.setColor(hovered ? new Color(32, 32, 50) : new Color(24, 24, 38));
+                    g2.fillRoundRect(10, y, getWidth() - 20, 42, 6, 6);
 
-                    g2.setColor(new Color(colors[i]));
-                    g2.fillRoundRect(12, y, 4, 44, 4, 4);
+                    // accent
+                    g2.setColor(accents[i]);
+                    g2.fillRect(10, y, 3, 42);
 
+                    // name
                     g2.setColor(new Color(210, 210, 230));
                     g2.setFont(new Font("Segoe UI", Font.BOLD, 14));
-                    g2.drawString(cats[i], 26, y + 19);
+                    g2.drawString(cats[i], 24, y + 18);
 
+                    // sub
                     g2.setColor(new Color(80, 80, 110));
-                    g2.setFont(new Font("Segoe UI", Font.ITALIC, 11));
-                    g2.drawString("0 modules", 26, y + 36);
+                    g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+                    g2.drawString("0 modules", 24, y + 34);
 
+                    // arrow
                     g2.setColor(new Color(60, 60, 90));
-                    g2.setFont(new Font("Segoe UI", Font.PLAIN, 16));
-                    g2.drawString(">", getWidth() - 35, y + 28);
+                    g2.drawString(">", getWidth() - 30, y + 26);
 
-                    y += 50;
+                    y += 48;
                 }
-
-                g2.dispose();
             }
         };
-        mainPanel.setOpaque(false);
-        mainPanel.setLayout(null);
+        panel.setBackground(new Color(16, 16, 28));
 
         // drag
-        final Point[] offset = {null};
-        mainPanel.addMouseListener(new MouseAdapter() {
-            public void mousePressed(MouseEvent e) { offset[0] = e.getPoint(); }
+        final int[] mx = {0}, my = {0};
+        panel.addMouseListener(new MouseAdapter() {
+            public void mousePressed(MouseEvent e) { mx[0] = e.getX(); my[0] = e.getY(); }
         });
-        mainPanel.addMouseMotionListener(new MouseMotionAdapter() {
+        panel.addMouseMotionListener(new MouseMotionAdapter() {
             public void mouseDragged(MouseEvent e) {
-                if (offset[0] != null) {
-                    Point loc = frame.getLocation();
-                    frame.setLocation(loc.x + e.getX() - offset[0].x,
-                                      loc.y + e.getY() - offset[0].y);
-                }
+                frame.setLocation(
+                    frame.getX() + e.getX() - mx[0],
+                    frame.getY() + e.getY() - my[0]);
             }
         });
 
-        // close on ESC
-        frame.addKeyListener(new KeyAdapter() {
+        // ESC to close
+        panel.setFocusable(true);
+        panel.addKeyListener(new KeyAdapter() {
             public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
-                    toggle();
-                }
+                if (e.getKeyCode() == KeyEvent.VK_ESCAPE) toggle();
             }
         });
 
-        // repaint timer
-        Timer timer = new Timer(50, e -> { if (frame.isVisible()) mainPanel.repaint(); });
-        timer.start();
+        // repaint for hover
+        new Timer(60, e -> { if (frame.isVisible()) panel.repaint(); }).start();
 
-        frame.setContentPane(mainPanel);
+        frame.setContentPane(panel);
         frame.setVisible(false);
+    }
+
+    public void show() {
+        SwingUtilities.invokeLater(() -> {
+            visible = true;
+            frame.setVisible(true);
+            frame.toFront();
+            System.out.println("[ClickGui] OPENED");
+        });
     }
 
     public void toggle() {
@@ -160,15 +152,10 @@ public class ClickGui {
             frame.setVisible(visible);
             if (visible) {
                 frame.toFront();
-                frame.requestFocus();
                 System.out.println("[ClickGui] OPENED");
             } else {
                 System.out.println("[ClickGui] CLOSED");
             }
         });
-    }
-
-    public boolean isVisible() {
-        return visible;
     }
 }
