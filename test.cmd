@@ -71,24 +71,14 @@ echo.
 
 set "MC_PID="
 
-:: Use jps to find Java processes
-for /f "tokens=1,2*" %%a in ('jps -l 2^>nul') do (
-    set "JPS_PID=%%a"
-    set "JPS_NAME=%%b"
-    echo     PID=%%a  %%b
-    if not "%%b"=="" (
-        echo "%%b" | findstr /i "minecraft net.minecraft fabricloader cpw.mods launchwrapper forge optifine tlauncher" >nul 2>&1
-        if !errorlevel!==0 (
-            set "MC_PID=%%a"
-        )
-    )
+:: Search for javaw.exe (Minecraft runs as javaw)
+for /f "tokens=2" %%a in ('tasklist /fi "imagename eq javaw.exe" /fo list 2^>nul ^| findstr /i "PID"') do (
+    if not defined MC_PID set "MC_PID=%%a"
 )
 
-:: Fallback: tasklist
+:: Fallback: java.exe
 if not defined MC_PID (
-    echo.
-    echo   Trying tasklist fallback...
-    for /f "tokens=2" %%a in ('tasklist /fi "imagename eq javaw.exe" /fo list 2^>nul ^| findstr /i "PID"') do (
+    for /f "tokens=2" %%a in ('tasklist /fi "imagename eq java.exe" /fo list 2^>nul ^| findstr /i "PID"') do (
         if not defined MC_PID set "MC_PID=%%a"
     )
 )
