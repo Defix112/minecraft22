@@ -10,7 +10,7 @@ public class Overlay {
     private static boolean glReady = false;
     private static long windowHandle;
 
-    static boolean flyOn, speedOn, sprintOn, autoClickOn, fullbrightOn;
+    // module states are in Fly.java, Speed.java, Sprint.java, AutoClicker.java, Fullbright.java
     private static int selectedCat = 0;
 
     private static final String[] CATS = {"Movement", "Combat", "Render"};
@@ -171,27 +171,18 @@ public class Overlay {
 
     static boolean isModEnabled(int cat, int mod) {
         if (cat == 0) {
-            if (mod == 0) return flyOn;
-            if (mod == 1) return speedOn;
-            if (mod == 2) return sprintOn;
+            if (mod == 0) return Fly.enabled;
+            if (mod == 1) return Speed.enabled;
+            if (mod == 2) return Sprint.enabled;
         } else if (cat == 1) {
-            if (mod == 0) return autoClickOn;
+            if (mod == 0) return AutoClicker.enabled;
         } else if (cat == 2) {
-            if (mod == 0) return fullbrightOn;
+            if (mod == 0) return Fullbright.enabled;
         }
         return false;
     }
 
     static void toggleMod(int cat, int mod) {
-        if (cat == 0) {
-            if (mod == 0) flyOn = !flyOn;
-            else if (mod == 1) speedOn = !speedOn;
-            else if (mod == 2) sprintOn = !sprintOn;
-        } else if (cat == 1) {
-            if (mod == 0) autoClickOn = !autoClickOn;
-        } else if (cat == 2) {
-            if (mod == 0) fullbrightOn = !fullbrightOn;
-        }
         Agent.onModuleToggle(cat, mod);
     }
 

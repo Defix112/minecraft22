@@ -11,10 +11,6 @@ public class Agent {
     private static volatile boolean loaded = false;
     private static volatile boolean running = true;
     private static GameHook hook;
-    private static Instrumentation instrumentation;
-
-    private static Process sprintProcess;
-    private static Process autoClickProcess;
 
     public static void agentmain(String args, Instrumentation inst) {
         writeLog("Agent loaded at " + System.currentTimeMillis());
@@ -24,7 +20,6 @@ public class Agent {
             return;
         }
         loaded = true;
-        instrumentation = inst;
 
         System.out.println("[Agent] ============================");
         System.out.println("[Agent] INJECTED OK - In-game GUI");
@@ -221,26 +216,11 @@ public class Agent {
     }
 
     public static void onModuleToggle(int cat, int mod) {
-        if (cat == 0 && mod == 0) {
-            writeLog("Fly: " + (Overlay.flyOn ? "ON" : "OFF"));
-            if (!Overlay.flyOn && hook != null && hook.isReady()) {
-                hook.setFlying(false);
-            }
-        } else if (cat == 0 && mod == 1) {
-            writeLog("Speed: " + (Overlay.speedOn ? "ON" : "OFF"));
-            if (!Overlay.speedOn && hook != null && hook.isReady()) {
-                hook.setSpeed(0.05f);
-            }
-        } else if (cat == 0 && mod == 2) {
-            writeLog("Sprint: " + (Overlay.sprintOn ? "ON" : "OFF"));
-            if (Overlay.sprintOn) startSprint(); else stopSprint();
-        } else if (cat == 1 && mod == 0) {
-            writeLog("AutoClick: " + (Overlay.autoClickOn ? "ON" : "OFF"));
-            if (Overlay.autoClickOn) startAutoClick(); else stopAutoClick();
-        } else if (cat == 2 && mod == 0) {
-            writeLog("Fullbright: " + (Overlay.fullbrightOn ? "ON" : "OFF"));
-            setGamma(Overlay.fullbrightOn ? 16.0 : 1.0);
-        }
+        if (cat == 0 && mod == 0) Fly.toggle(hook);
+        else if (cat == 0 && mod == 1) Speed.toggle(hook);
+        else if (cat == 0 && mod == 2) Sprint.toggle();
+        else if (cat == 1 && mod == 0) AutoClicker.toggle();
+        else if (cat == 2 && mod == 0) Fullbright.toggle();
         updateStatus();
     }
 
@@ -249,15 +229,13 @@ public class Agent {
             while (running) {
                 try {
                     Thread.sleep(50);
-                    if (hook == null || !hook.isReady()) {
-                        if (hook != null) hook.refreshPlayer();
-                        continue;
-                    }
-                    hook.refreshPlayer();
-                    if (!hook.isReady()) continue;
+                    if (hook != null) hook.refreshPlayer();
 
-                    if (Overlay.flyOn) hook.setFlying(true);
-                    if (Overlay.speedOn) hook.setSpeed(0.15f);
+                    Fly.tick(hook);
+                    Speed.tick(hook);
+                    Sprint.tick();
+                    AutoClicker.tick();
+                    Fullbright.tick();
                 } catch (Exception e) {}
             }
         }, "Agent-ModuleTick");
@@ -299,22 +277,16 @@ public class Agent {
         writeLog("PANIC activated");
         running = false;
 
-        Overlay.flyOn = false;
-        Overlay.speedOn = false;
-        Overlay.sprintOn = false;
-        Overlay.autoClickOn = false;
-        Overlay.fullbrightOn = false;
+        Fly.disable(hook);
+        Speed.disable(hook);
+        Sprint.disable();
+        AutoClicker.disable();
+        Fullbright.disable();
         Overlay.visible = false;
 
         if (hook != null && hook.isReady()) {
-            hook.setFlying(false);
-            hook.setSpeed(0.05f);
             hook.restore();
         }
-
-        stopSprint();
-        stopAutoClick();
-        setGamma(1.0);
 
         String tmp = System.getProperty("java.io.tmpdir");
         new File(tmp, "clickgui_cmd.txt").delete();
@@ -326,98 +298,13 @@ public class Agent {
         System.out.println("[Agent] PANIC - all disabled and cleaned");
     }
 
-    private static void startSprint() {
-        if (sprintProcess != null && sprintProcess.isAlive()) return;
-        try {
-            sprintProcess = new ProcessBuilder(
-                "powershell.exe", "-NoProfile", "-NoLogo",
-                "-ExecutionPolicy", "Bypass", "-Command",
-                "Add-Type -TypeDefinition @'\n" +
-                "using System; using System.Runtime.InteropServices;\n" +
-                "public class K { [DllImport(\"user32.dll\")] public static extern void keybd_event(byte v,byte s,int f,int e); }\n" +
-                "'@\n" +
-                "while($true) { [K]::keybd_event(0xA2,0,0,0); Start-Sleep -Milliseconds 50 }"
-            ).redirectErrorStream(true).start();
-        } catch (Exception e) {
-            writeLog("Sprint error: " + e.getMessage());
-        }
-    }
-
-    private static void stopSprint() {
-        if (sprintProcess != null) {
-            sprintProcess.destroyForcibly();
-            sprintProcess = null;
-        }
-        try {
-            new ProcessBuilder("powershell.exe", "-NoProfile", "-Command",
-                "Add-Type -TypeDefinition @'\nusing System; using System.Runtime.InteropServices;\n" +
-                "public class R { [DllImport(\"user32.dll\")] public static extern void keybd_event(byte v,byte s,int f,int e); }\n" +
-                "'@; [R]::keybd_event(0xA2,0,2,0)"
-            ).start();
-        } catch (Exception e) {}
-    }
-
-    private static void startAutoClick() {
-        if (autoClickProcess != null && autoClickProcess.isAlive()) return;
-        try {
-            autoClickProcess = new ProcessBuilder(
-                "powershell.exe", "-NoProfile", "-NoLogo",
-                "-ExecutionPolicy", "Bypass", "-Command",
-                "Add-Type -TypeDefinition @'\n" +
-                "using System; using System.Runtime.InteropServices;\n" +
-                "public class M {\n" +
-                "  [DllImport(\"user32.dll\")] public static extern void mouse_event(int f,int x,int y,int d,int e);\n" +
-                "  [DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int k);\n" +
-                "}\n'@\n" +
-                "while($true) {\n" +
-                "  $held = ([M]::GetAsyncKeyState(1) -band 0x8000) -ne 0\n" +
-                "  if($held) {\n" +
-                "    [M]::mouse_event(2,0,0,0,0); Start-Sleep -Milliseconds 10\n" +
-                "    [M]::mouse_event(4,0,0,0,0)\n" +
-                "  }\n" +
-                "  Start-Sleep -Milliseconds 73\n" +
-                "}"
-            ).redirectErrorStream(true).start();
-        } catch (Exception e) {
-            writeLog("AutoClick error: " + e.getMessage());
-        }
-    }
-
-    private static void stopAutoClick() {
-        if (autoClickProcess != null) {
-            autoClickProcess.destroyForcibly();
-            autoClickProcess = null;
-        }
-    }
-
-    private static void setGamma(double v) {
-        try {
-            String ad = System.getenv("APPDATA");
-            if (ad == null) return;
-            File f = new File(ad, ".minecraft" + File.separator + "options.txt");
-            if (!f.exists()) return;
-            java.util.List<String> lines = Files.readAllLines(f.toPath());
-            java.util.List<String> out = new java.util.ArrayList<>();
-            boolean found = false;
-            for (String l : lines) {
-                if (l.startsWith("gamma:")) { out.add("gamma:" + v); found = true; }
-                else out.add(l);
-            }
-            if (!found) out.add("gamma:" + v);
-            Files.write(f.toPath(), out);
-            writeLog("Gamma -> " + v);
-        } catch (Exception e) {
-            writeLog("Gamma error: " + e.getMessage());
-        }
-    }
-
     private static void updateStatus() {
         StringBuilder sb = new StringBuilder();
-        if (Overlay.flyOn) sb.append("Fly:ON ");
-        if (Overlay.speedOn) sb.append("Speed:ON ");
-        if (Overlay.sprintOn) sb.append("Sprint:ON ");
-        if (Overlay.autoClickOn) sb.append("AutoClick:ON ");
-        if (Overlay.fullbrightOn) sb.append("Fullbright:ON ");
+        if (Fly.enabled) sb.append("Fly:ON ");
+        if (Speed.enabled) sb.append("Speed:ON ");
+        if (Sprint.enabled) sb.append("Sprint:ON ");
+        if (AutoClicker.enabled) sb.append("AutoClick:ON ");
+        if (Fullbright.enabled) sb.append("Fullbright:ON ");
         if (sb.length() == 0) sb.append("All OFF");
         writeStatus(sb.toString().trim());
     }
