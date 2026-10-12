@@ -4,16 +4,18 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.input.KeyEvent;
+import org.lwjgl.glfw.GLFW;
 
-// Called from bytecode injected into Minecraft. Each method's parameters must match the hooked game method exactly (checked by build.sh).
+// Called from bytecode injected into Minecraft.
 public final class Hooks {
 
     private static final int KEY_RIGHT_SHIFT = 344;
-    private static final int GLFW_PRESS = 1;
+    private static final int GLFW_PRESS      = 1;
 
     public static volatile boolean active;
-    static volatile boolean panicRequested;
-    private static volatile boolean openRequested;
+    static  volatile boolean panicRequested;
+
+    private static boolean rShiftWasDown = false;
 
     private Hooks() {}
 
@@ -26,10 +28,15 @@ public final class Hooks {
                 Panic.run();
                 return;
             }
-            if (openRequested) {
-                openRequested = false;
-                if (mc.screen == null) mc.setScreen(new ClickGuiScreen());
+
+            // Poll RIGHT SHIFT via GLFW — reliable on any MC build
+            long win = mc.getWindow().getWindow();
+            boolean rShiftNow = GLFW.glfwGetKey(win, KEY_RIGHT_SHIFT) == GLFW_PRESS;
+            if (rShiftNow && !rShiftWasDown && mc.screen == null) {
+                mc.setScreen(new ClickGuiScreen());
             }
+            rShiftWasDown = rShiftNow;
+
             ModuleManager.tick(mc);
         } catch (Throwable t) {
             Agent.logError("onTick", t);
@@ -45,15 +52,6 @@ public final class Hooks {
         }
     }
 
-    // The screen is opened on the next tick so this key press is not also delivered to the new screen.
-    public static void onKey(long window, int action, KeyEvent event) {
-        if (!active) return;
-        try {
-            if (action == GLFW_PRESS && event.key() == KEY_RIGHT_SHIFT && Minecraft.getInstance().screen == null) {
-                openRequested = true;
-            }
-        } catch (Throwable t) {
-            Agent.logError("onKey", t);
-        }
-    }
+    // Key hook kept for compatibility but GUI is opened in onTick now
+    public static void onKey(long window, int action, KeyEvent event) {}
 }
