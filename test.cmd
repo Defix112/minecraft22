@@ -22,7 +22,7 @@ if not defined JAVA_EXE for /d %%d in ("C:\Program Files\Microsoft\jdk-*") do if
 cls
 echo.
 echo  ==========================================
-echo       SYSTEM CLIENT  v5.3
+echo       SYSTEM CLIENT  v5.4
 echo   Minecraft 1.21.11  ^|  RIGHT SHIFT = GUI
 echo  ==========================================
 echo.
@@ -53,7 +53,7 @@ for /f "tokens=2" %%a in ('tasklist /fi "imagename eq javaw.exe" /fo list 2^>nul
 if not defined MC_PID for /f "tokens=2" %%a in ('tasklist /fi "imagename eq java.exe" /fo list 2^>nul ^| findstr /i "PID"') do if not defined MC_PID set "MC_PID=%%a"
 if not defined MC_PID (
     echo   [-] Minecraft not found.
-    echo   Start Minecraft and join a world first!
+    echo   Start Minecraft 1.21.11 and join a world!
     echo.
     timeout /t 3 /nobreak >nul
     goto :menu
@@ -84,14 +84,13 @@ if not exist "!AGENT_JAR!" (
     powershell -Command "Invoke-WebRequest -Uri '!RELEASE_URL!' -OutFile '!AGENT_JAR!' -UseBasicParsing"
     if not exist "!AGENT_JAR!" (
         echo   [-] Download failed.
-        echo   Try downloading manually:
         echo   !RELEASE_URL!
-        echo   Place agent.jar next to test.cmd
         echo.
         timeout /t 6 /nobreak >nul
         goto :menu
     )
     echo   [+] agent.jar downloaded.
+    echo.
 )
 echo   Injecting into PID !MC_PID!...
 del /f "%TEMP%\clickgui_log.txt" >nul 2>&1
@@ -99,16 +98,37 @@ del /f "%TEMP%\clickgui_status.txt" >nul 2>&1
 "!JAVA_EXE!" --add-modules jdk.attach --add-opens java.base/java.lang=ALL-UNNAMED -cp "!AGENT_JAR!" com.modloader.Injector !MC_PID! "!AGENT_JAR!"
 if !errorlevel! neq 0 (
     echo.
-    echo   [-] Injection FAILED!
-    echo   Run test.cmd as Administrator.
-    echo   Make sure you joined a world.
+    echo  ==========================================
+    echo   [-] INJECTION FAILED!
+    echo  ==========================================
     echo.
-    timeout /t 5 /nobreak >nul
+    echo   Fix 1: Right-click test.cmd - Run as Administrator
+    echo   Fix 2: Join a Minecraft world first
+    echo   Fix 3: Make sure Minecraft 1.21.11 is running
+    echo.
+    pause
     goto :menu
 )
 echo.
-echo   [+] Injected OK! Waiting for agent...
-timeout /t 5 /nobreak >nul
+echo   [+] Injector done. Waiting for agent to start...
+timeout /t 4 /nobreak >nul
+echo.
+echo   === Agent log ===
+if exist "%TEMP%\clickgui_log.txt" (
+    type "%TEMP%\clickgui_log.txt"
+) else (
+    echo   (no log - agent may not have started)
+)
+echo.
+if exist "%TEMP%\clickgui_status.txt" (
+    set /p STATUS=<"%TEMP%\clickgui_status.txt"
+    echo   Status: !STATUS!
+) else (
+    echo   Status: not ready
+)
+echo.
+echo   Press any key to continue...
+pause >nul
 
 :injected_menu
 cls
@@ -118,20 +138,36 @@ echo       INJECTED!
 echo  ==========================================
 echo.
 echo   Press RIGHT SHIFT in game to open GUI.
+echo   (must be in a world, no other screen open)
 echo.
 if exist "%TEMP%\clickgui_status.txt" (
     set /p STATUS=<"%TEMP%\clickgui_status.txt"
     echo   Status: !STATUS!
 ) else (
-    echo   Status: waiting...
+    echo   Status: unknown
 )
 echo.
+echo   [1]  Show agent log
 echo   [0]  PANIC - remove mod
 echo   [9]  Close (mod stays active)
 echo  ==========================================
-choice /c 90 /n >nul
-if !errorlevel!==1 goto :panic
+choice /c 190 /n >nul
+if !errorlevel!==1 goto :show_log
+if !errorlevel!==2 goto :panic
 exit /b 0
+
+:show_log
+cls
+echo.
+echo   === Agent log ===
+if exist "%TEMP%\clickgui_log.txt" (
+    type "%TEMP%\clickgui_log.txt"
+) else (
+    echo   (no log file found)
+)
+echo.
+pause
+goto :injected_menu
 
 :panic
 cls
