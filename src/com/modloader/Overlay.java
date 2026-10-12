@@ -10,20 +10,27 @@ public class Overlay {
     private static boolean glReady = false;
     private static long windowHandle;
 
-    // module states are in Fly.java, Speed.java, Sprint.java, AutoClicker.java, Fullbright.java
     private static int selectedCat = 0;
 
-    private static final String[] CATS = {"Movement", "Combat", "Render"};
+    private static final String[] CATS = {"Combat", "Movement", "Render"};
+    private static final int[][] CAT_ICONS = {
+        {0x04,0x0E,0x1F,0x0E,0x04,0x04,0x04},
+        {0x04,0x0E,0x15,0x04,0x04,0x04,0x0E},
+        {0x0E,0x11,0x11,0x11,0x0E,0x04,0x04}
+    };
+
     private static final String[][] MOD_NAMES = {
+        {"AutoClicker"},
         {"Fly", "Speed", "Sprint"},
-        {"AutoClick"},
         {"Fullbright"}
     };
     private static final String[][] MOD_DESCS = {
-        {"Fly in survival", "Move 3x faster", "Always sprint"},
         {"Fast click 12 CPS"},
-        {"Max brightness"}
+        {"Fly in survival mode", "Move 3x faster", "Always sprint (hold Ctrl)"},
+        {"Maximum brightness"}
     };
+
+    private static final int ACCENT_R = 100, ACCENT_G = 120, ACCENT_B = 255;
 
     private static MethodHandle hGlEnable, hGlDisable, hGlBegin, hGlEnd;
     private static MethodHandle hGlVertex2f, hGlColor4f;
@@ -32,10 +39,10 @@ public class Overlay {
     private static MethodHandle hGlBlendFunc, hGlPushAttrib, hGlPopAttrib;
     private static MethodHandle hGlLineWidth;
 
-    private static int GL_QUADS, GL_BLEND, GL_DEPTH_TEST, GL_TEXTURE_2D;
+    private static int GL_QUADS, GL_LINES, GL_BLEND, GL_DEPTH_TEST, GL_TEXTURE_2D;
     private static int GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA;
     private static int GL_PROJECTION, GL_MODELVIEW;
-    private static int GL_ALL_ATTRIB_BITS;
+    private static int GL_ALL_ATTRIB_BITS, GL_LINE_SMOOTH;
 
     private static Method mGetCursorPos, mGetMouseButton, mGetFbSize, mSetInputMode;
     private static int GLFW_CURSOR, GLFW_CURSOR_NORMAL, GLFW_CURSOR_DISABLED;
@@ -50,7 +57,11 @@ public class Overlay {
     private static boolean mouseDown, mouseClicked;
     private static boolean prevMouseDown;
 
-    private static final int GUI_W = 320, GUI_H = 220;
+    private static final int GUI_W = 480, GUI_H = 320;
+    private static final int SIDEBAR_W = 140;
+    private static final int HEADER_H = 44;
+    private static final int MOD_H = 52;
+    private static final int MOD_GAP = 6;
     private static int guiX, guiY;
 
     static boolean init(long window) {
@@ -79,6 +90,7 @@ public class Overlay {
             hGlLineWidth = lookup.findStatic(gl11, "glLineWidth", MethodType.methodType(void.class, float.class));
 
             GL_QUADS = gl11.getField("GL_QUADS").getInt(null);
+            GL_LINES = gl11.getField("GL_LINES").getInt(null);
             GL_BLEND = gl11.getField("GL_BLEND").getInt(null);
             GL_DEPTH_TEST = gl11.getField("GL_DEPTH_TEST").getInt(null);
             GL_TEXTURE_2D = gl11.getField("GL_TEXTURE_2D").getInt(null);
@@ -87,6 +99,7 @@ public class Overlay {
             GL_PROJECTION = gl11.getField("GL_PROJECTION").getInt(null);
             GL_MODELVIEW = gl11.getField("GL_MODELVIEW").getInt(null);
             GL_ALL_ATTRIB_BITS = gl11.getField("GL_ALL_ATTRIB_BITS").getInt(null);
+            GL_LINE_SMOOTH = gl11.getField("GL_LINE_SMOOTH").getInt(null);
 
             Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW", true, cl);
             mGetCursorPos = glfw.getMethod("glfwGetCursorPos", long.class, DoubleBuffer.class, DoubleBuffer.class);
@@ -142,6 +155,8 @@ public class Overlay {
             hGlEnable.invokeExact(GL_BLEND);
             hGlBlendFunc.invokeExact(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+            drawRect(0, 0, screenW, screenH, 0, 0, 0, 120);
+
             drawGui();
 
             hGlMatrixMode.invokeExact(GL_PROJECTION);
@@ -151,9 +166,7 @@ public class Overlay {
             hGlPopAttrib.invokeExact();
 
             mouseClicked = false;
-        } catch (Throwable t) {
-            // ignore render errors
-        }
+        } catch (Throwable t) {}
     }
 
     public static void onKey(int key, int action) {
@@ -171,11 +184,11 @@ public class Overlay {
 
     static boolean isModEnabled(int cat, int mod) {
         if (cat == 0) {
+            if (mod == 0) return AutoClicker.enabled;
+        } else if (cat == 1) {
             if (mod == 0) return Fly.enabled;
             if (mod == 1) return Speed.enabled;
             if (mod == 2) return Sprint.enabled;
-        } else if (cat == 1) {
-            if (mod == 0) return AutoClicker.enabled;
         } else if (cat == 2) {
             if (mod == 0) return Fullbright.enabled;
         }
@@ -183,74 +196,122 @@ public class Overlay {
     }
 
     static void toggleMod(int cat, int mod) {
-        Agent.onModuleToggle(cat, mod);
+        if (cat == 0 && mod == 0) Agent.onModuleToggle(1, 0);
+        else if (cat == 1 && mod == 0) Agent.onModuleToggle(0, 0);
+        else if (cat == 1 && mod == 1) Agent.onModuleToggle(0, 1);
+        else if (cat == 1 && mod == 2) Agent.onModuleToggle(0, 2);
+        else if (cat == 2 && mod == 0) Agent.onModuleToggle(2, 0);
     }
 
     private static void drawGui() throws Throwable {
         int x = guiX, y = guiY;
 
-        drawRect(x, y, GUI_W, GUI_H, 12, 12, 24, 230);
+        drawRect(x, y, GUI_W, GUI_H, 18, 18, 26, 240);
 
-        drawRect(x, y, GUI_W, 28, 18, 18, 34, 255);
-        drawRect(x, y + 28, GUI_W, 2, 80, 130, 255, 255);
+        drawRect(x, y, GUI_W, 2, ACCENT_R, ACCENT_G, ACCENT_B, 255);
 
-        drawString(x + 10, y + 8, "CLICKGUI", 80, 140, 255, 2.0f);
-        drawString(x + 130, y + 12, "RSHIFT=TOGGLE", 70, 70, 100, 1.0f);
+        drawRect(x, y + 2, GUI_W, HEADER_H - 2, 22, 22, 32, 255);
 
-        int leftW = 90;
-        int catY = y + 34;
+        drawString(x + 16, y + 14, "SYSTEM", ACCENT_R, ACCENT_G, ACCENT_B, 2.5f);
+        drawString(x + 112, y + 18, "CLIENT", 180, 180, 200, 1.5f);
+
+        drawString(x + GUI_W - 120, y + 18, "RSHIFT", 60, 60, 80, 1.2f);
+
+        drawRect(x, y + HEADER_H, GUI_W, 1, 35, 35, 50, 255);
+
+        drawRect(x, y + HEADER_H + 1, SIDEBAR_W, GUI_H - HEADER_H - 1, 14, 14, 22, 255);
+
+        int catY = y + HEADER_H + 12;
         for (int i = 0; i < CATS.length; i++) {
-            int cy = catY + i * 56;
+            int cy = catY + i * 48;
             boolean sel = (i == selectedCat);
-            boolean hov = inRect(mouseX, mouseY, x + 4, cy, leftW, 50);
+            boolean hov = inRect(mouseX, mouseY, x, cy - 4, SIDEBAR_W, 40);
 
             if (mouseClicked && hov) selectedCat = i;
 
-            drawRect(x + 4, cy, leftW, 50, sel ? 28 : hov ? 22 : 16, sel ? 28 : hov ? 22 : 16, sel ? 50 : hov ? 42 : 32, 255);
+            if (sel) {
+                drawRect(x, cy - 4, SIDEBAR_W, 40, ACCENT_R, ACCENT_G, ACCENT_B, 20);
+                drawRect(x, cy - 4, 3, 40, ACCENT_R, ACCENT_G, ACCENT_B, 255);
+            } else if (hov) {
+                drawRect(x, cy - 4, SIDEBAR_W, 40, 255, 255, 255, 8);
+            }
 
-            if (sel) drawRect(x + 4, cy, 3, 50, catColor(i, 0), catColor(i, 1), catColor(i, 2), 255);
+            if (CAT_ICONS[i] != null) {
+                drawIcon(x + 16, cy + 4, CAT_ICONS[i], sel ? ACCENT_R : 90, sel ? ACCENT_G : 90, sel ? ACCENT_B : 110, 1.8f);
+            }
 
-            drawString(x + 16, cy + 20, CATS[i].toUpperCase(), sel ? 255 : 180, sel ? 255 : 180, sel ? 255 : 200, 1.5f);
+            drawString(x + 38, cy + 8, CATS[i].toUpperCase(),
+                sel ? 240 : hov ? 200 : 130,
+                sel ? 240 : hov ? 200 : 130,
+                sel ? 255 : hov ? 210 : 150, 1.5f);
+
+            int count = MOD_NAMES[i].length;
+            String countStr = "" + count;
+            drawString(x + SIDEBAR_W - 20, cy + 10, countStr, 60, 60, 80, 1.0f);
         }
 
-        int rightX = x + leftW + 10;
-        int rightW = GUI_W - leftW - 16;
-        int modY = y + 34;
+        drawRect(x + SIDEBAR_W, y + HEADER_H + 1, 1, GUI_H - HEADER_H - 1, 35, 35, 50, 255);
+
+        int contentX = x + SIDEBAR_W + 12;
+        int contentW = GUI_W - SIDEBAR_W - 24;
+        int modY = y + HEADER_H + 14;
+
+        drawString(contentX, modY, CATS[selectedCat].toUpperCase(), 80, 80, 110, 1.2f);
+        modY += 20;
+
+        drawRect(contentX, modY, contentW, 1, 35, 35, 50, 255);
+        modY += 8;
 
         String[] mods = MOD_NAMES[selectedCat];
         String[] descs = MOD_DESCS[selectedCat];
 
         for (int i = 0; i < mods.length; i++) {
-            int my = modY + i * 50;
+            int my = modY + i * (MOD_H + MOD_GAP);
             boolean enabled = isModEnabled(selectedCat, i);
-            boolean hov = inRect(mouseX, mouseY, rightX, my, rightW, 44);
+            boolean hov = inRect(mouseX, mouseY, contentX, my, contentW, MOD_H);
 
             if (mouseClicked && hov) toggleMod(selectedCat, i);
 
-            drawRect(rightX, my, rightW, 44, hov ? 26 : 18, hov ? 26 : 18, hov ? 46 : 34, 255);
+            if (hov) {
+                drawRect(contentX, my, contentW, MOD_H, 255, 255, 255, 10);
+            }
+            drawRect(contentX, my, contentW, MOD_H, 28, 28, 40, 200);
 
-            if (enabled) drawRect(rightX, my, rightW, 44, 60, 200, 100, 30);
-
-            int tx = rightX + rightW - 44;
-            int ty = my + 14;
             if (enabled) {
-                drawRect(tx, ty, 36, 18, 60, 200, 100, 255);
-                drawRect(tx + 18, ty + 2, 14, 14, 255, 255, 255, 255);
-            } else {
-                drawRect(tx, ty, 36, 18, 50, 50, 70, 255);
-                drawRect(tx + 2, ty + 2, 14, 14, 80, 80, 100, 255);
+                drawRect(contentX, my, 3, MOD_H, ACCENT_R, ACCENT_G, ACCENT_B, 255);
             }
 
-            drawString(rightX + 10, my + 12, mods[i].toUpperCase(), enabled ? 255 : 160, enabled ? 255 : 160, enabled ? 255 : 180, 1.5f);
-            drawString(rightX + 10, my + 30, descs[i].toUpperCase(), 65, 65, 90, 1.0f);
+            drawString(contentX + 14, my + 12, mods[i].toUpperCase(),
+                enabled ? 240 : 170, enabled ? 240 : 170, enabled ? 255 : 190, 1.8f);
+
+            drawString(contentX + 14, my + 32, descs[i].toUpperCase(), 70, 70, 95, 1.0f);
+
+            int toggleX = contentX + contentW - 48;
+            int toggleY = my + 16;
+            int toggleW = 36;
+            int toggleH = 18;
+
+            if (enabled) {
+                drawRect(toggleX, toggleY, toggleW, toggleH, ACCENT_R, ACCENT_G, ACCENT_B, 255);
+                drawRect(toggleX + toggleW - 16, toggleY + 2, 14, 14, 255, 255, 255, 255);
+            } else {
+                drawRect(toggleX, toggleY, toggleW, toggleH, 45, 45, 60, 255);
+                drawRect(toggleX + 2, toggleY + 2, 14, 14, 70, 70, 90, 255);
+            }
+
+            String stateText = enabled ? "ON" : "OFF";
+            drawString(toggleX - 28, toggleY + 4, stateText,
+                enabled ? ACCENT_R : 70, enabled ? ACCENT_G : 70, enabled ? ACCENT_B : 90, 1.0f);
         }
 
-        drawString(x + GUI_W - 26, y + GUI_H - 10, "V2", 40, 40, 60, 1.0f);
-    }
+        drawRect(x, y + GUI_H - 24, GUI_W, 1, 35, 35, 50, 255);
+        drawString(x + 12, y + GUI_H - 16, "V3.0", 45, 45, 65, 1.0f);
 
-    private static int catColor(int cat, int ch) {
-        int[][] c = {{255, 75, 120}, {255, 75, 75}, {75, 200, 255}};
-        return c[cat][ch];
+        int enabledCount = 0;
+        for (int c = 0; c < MOD_NAMES.length; c++)
+            for (int m = 0; m < MOD_NAMES[c].length; m++)
+                if (isModEnabled(c, m)) enabledCount++;
+        drawString(x + 60, y + GUI_H - 16, enabledCount + " ACTIVE", 45, 45, 65, 1.0f);
     }
 
     private static void drawRect(int x, int y, int w, int h, int r, int g, int b, int a) throws Throwable {
@@ -260,6 +321,24 @@ public class Overlay {
         hGlVertex2f.invokeExact((float) (x + w), (float) y);
         hGlVertex2f.invokeExact((float) (x + w), (float) (y + h));
         hGlVertex2f.invokeExact((float) x, (float) (y + h));
+        hGlEnd.invokeExact();
+    }
+
+    private static void drawIcon(int x, int y, int[] icon, int r, int g, int b, float scale) throws Throwable {
+        hGlColor4f.invokeExact(r / 255f, g / 255f, b / 255f, 1.0f);
+        hGlBegin.invokeExact(GL_QUADS);
+        for (int row = 0; row < icon.length; row++) {
+            for (int col = 0; col < 5; col++) {
+                if ((icon[row] & (1 << (4 - col))) != 0) {
+                    float px = x + col * scale;
+                    float py = y + row * scale;
+                    hGlVertex2f.invokeExact(px, py);
+                    hGlVertex2f.invokeExact(px + scale, py);
+                    hGlVertex2f.invokeExact(px + scale, py + scale);
+                    hGlVertex2f.invokeExact(px, py + scale);
+                }
+            }
+        }
         hGlEnd.invokeExact();
     }
 
@@ -326,6 +405,8 @@ public class Overlay {
         FONT[':'] = new int[]{0,0x04,0x04,0,0x04,0x04,0};
         FONT['.'] = new int[]{0,0,0,0,0,0,0x04};
         FONT['='] = new int[]{0,0,0x1F,0,0x1F,0,0};
+        FONT['('] = new int[]{0x02,0x04,0x08,0x08,0x08,0x04,0x02};
+        FONT[')'] = new int[]{0x08,0x04,0x02,0x02,0x02,0x04,0x08};
         FONT['0'] = new int[]{0x0E,0x11,0x13,0x15,0x19,0x11,0x0E};
         FONT['1'] = new int[]{0x04,0x0C,0x04,0x04,0x04,0x04,0x0E};
         FONT['2'] = new int[]{0x0E,0x11,0x01,0x02,0x04,0x08,0x1F};
