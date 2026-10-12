@@ -1,51 +1,44 @@
 package com.modloader;
 
-public class Module {
+import net.minecraft.client.Minecraft;
 
-    final String name, category, desc;
-    volatile boolean enabled;
-    Process process;
-    Thread thread;
-    Runnable onEnable, onDisable;
+public abstract class Module {
 
-    Module(String name, String category, String desc) {
+    private final String name;
+    private final String description;
+    private final Category category;
+    private boolean enabled;
+
+    protected Module(String name, String description, Category category) {
         this.name = name;
+        this.description = description;
         this.category = category;
-        this.desc = desc;
     }
 
-    void toggle() {
-        enabled = !enabled;
+    public String getName() { return name; }
+    public String getDescription() { return description; }
+    public Category getCategory() { return category; }
+    public boolean isEnabled() { return enabled; }
+
+    public void toggle() {
+        setEnabled(!enabled);
+    }
+
+    public void setEnabled(boolean value) {
+        if (value == enabled) return;
+        enabled = value;
         try {
-            if (enabled && onEnable != null) onEnable.run();
-            if (!enabled) {
-                if (onDisable != null) onDisable.run();
-                kill();
-            }
-        } catch (Exception e) {
-            System.out.println("[ClickGui] " + name + " error: " + e.getMessage());
-            enabled = false;
+            if (value) onEnable(); else onDisable();
+        } catch (Throwable t) {
+            Agent.logError(name + (value ? ".onEnable" : ".onDisable"), t);
         }
+        Agent.log(name + (value ? " ON" : " OFF"));
+        Agent.writeStatus(ModuleManager.statusLine());
     }
 
-    void kill() {
-        if (process != null) { process.destroyForcibly(); process = null; }
-        if (thread != null) { thread.interrupt(); thread = null; }
-    }
+    protected void onEnable() {}
 
-    void startPS(String script) {
-        thread = new Thread(() -> {
-            try {
-                process = new ProcessBuilder(
-                    "powershell.exe", "-NoProfile", "-NoLogo",
-                    "-ExecutionPolicy", "Bypass", "-Command", script
-                ).redirectErrorStream(true).start();
-                process.waitFor();
-            } catch (Exception e) {
-                System.out.println("[ClickGui] " + name + " PS failed: " + e.getMessage());
-            }
-        }, "Mod-" + name);
-        thread.setDaemon(true);
-        thread.start();
-    }
+    protected void onDisable() {}
+
+    public void onTick(Minecraft mc) {}
 }

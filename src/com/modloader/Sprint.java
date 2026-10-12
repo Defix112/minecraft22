@@ -1,51 +1,28 @@
 package com.modloader;
 
-import java.awt.Robot;
-import java.awt.event.KeyEvent;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 
-public class Sprint {
+public class Sprint extends Module {
 
-    static volatile boolean enabled = false;
-    private static Robot robot;
-    private static volatile boolean keyHeld = false;
+    public Sprint() {
+        super("Sprint", "Автоматический бег", Category.MOVEMENT);
+    }
 
-    static void toggle() {
-        enabled = !enabled;
-        Agent.writeLog("Sprint: " + (enabled ? "ON" : "OFF"));
-        if (enabled) {
-            press();
-        } else {
-            release();
+    @Override
+    public void onTick(Minecraft mc) {
+        LocalPlayer player = mc.player;
+        if (player == null || player.isSprinting()) return;
+        if (player.input.hasForwardImpulse()
+                && !player.isShiftKeyDown()
+                && player.getFoodData().getFoodLevel() > 6) {
+            player.setSprinting(true);
         }
     }
 
-    static void tick() {
-        if (enabled && !keyHeld) {
-            press();
-        }
-    }
-
-    static void disable() {
-        enabled = false;
-        release();
-    }
-
-    private static void press() {
-        try {
-            if (robot == null) robot = new Robot();
-            robot.keyPress(KeyEvent.VK_CONTROL);
-            keyHeld = true;
-        } catch (Exception e) {
-            Agent.writeLog("Sprint error: " + e.getMessage());
-        }
-    }
-
-    private static void release() {
-        try {
-            if (robot != null && keyHeld) {
-                robot.keyRelease(KeyEvent.VK_CONTROL);
-            }
-        } catch (Exception e) {}
-        keyHeld = false;
+    @Override
+    protected void onDisable() {
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player != null) player.setSprinting(false);
     }
 }

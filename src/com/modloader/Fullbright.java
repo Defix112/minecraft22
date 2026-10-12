@@ -1,52 +1,27 @@
 package com.modloader;
 
-import java.io.*;
-import java.nio.file.*;
-import java.util.*;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 
-public class Fullbright {
+public class Fullbright extends Module {
 
-    static volatile boolean enabled = false;
-    private static final double BRIGHT = 16.0;
-    private static final double NORMAL = 1.0;
-
-    static void toggle() {
-        enabled = !enabled;
-        Agent.writeLog("Fullbright: " + (enabled ? "ON" : "OFF"));
-        setGamma(enabled ? BRIGHT : NORMAL);
+    public Fullbright() {
+        super("Fullbright", "Максимальная яркость", Category.RENDER);
     }
 
-    static void tick() {
-        // gamma set once on toggle
+    @Override
+    public void onTick(Minecraft mc) {
+        LocalPlayer player = mc.player;
+        if (player == null || player.hasEffect(MobEffects.NIGHT_VISION)) return;
+        player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION,
+            MobEffectInstance.INFINITE_DURATION, 0, false, false, false));
     }
 
-    static void disable() {
-        enabled = false;
-        setGamma(NORMAL);
-    }
-
-    private static void setGamma(double v) {
-        try {
-            String ad = System.getenv("APPDATA");
-            if (ad == null) return;
-            File f = new File(ad, ".minecraft" + File.separator + "options.txt");
-            if (!f.exists()) return;
-            List<String> lines = Files.readAllLines(f.toPath());
-            List<String> out = new ArrayList<>();
-            boolean found = false;
-            for (String l : lines) {
-                if (l.startsWith("gamma:")) {
-                    out.add("gamma:" + v);
-                    found = true;
-                } else {
-                    out.add(l);
-                }
-            }
-            if (!found) out.add("gamma:" + v);
-            Files.write(f.toPath(), out);
-            Agent.writeLog("Gamma -> " + v);
-        } catch (Exception e) {
-            Agent.writeLog("Gamma error: " + e.getMessage());
-        }
+    @Override
+    protected void onDisable() {
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player != null) player.removeEffect(MobEffects.NIGHT_VISION);
     }
 }

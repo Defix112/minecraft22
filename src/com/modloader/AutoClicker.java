@@ -1,64 +1,37 @@
 package com.modloader;
 
-import java.awt.Robot;
-import java.awt.event.InputEvent;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.phys.HitResult;
 
-public class AutoClicker {
+public class AutoClicker extends Module {
 
-    static volatile boolean enabled = false;
-    private static Robot robot;
-    private static Thread clickThread;
-    private static final int CPS = 12;
+    private static final double CPS = 12.0;
+    private double pending;
 
-    static void toggle() {
-        enabled = !enabled;
-        Agent.writeLog("AutoClicker: " + (enabled ? "ON" : "OFF"));
-        if (enabled) {
-            start();
-        } else {
-            stop();
-        }
+    public AutoClicker() {
+        super("AutoClicker", "12 CPS, пока зажата ЛКМ", Category.COMBAT);
     }
 
-    static void tick() {
-        // click thread handles timing
-    }
-
-    static void disable() {
-        enabled = false;
-        stop();
-    }
-
-    private static void start() {
-        if (clickThread != null && clickThread.isAlive()) return;
-        try {
-            if (robot == null) robot = new Robot();
-        } catch (Exception e) {
-            Agent.writeLog("AutoClicker error: " + e.getMessage());
-            enabled = false;
+    @Override
+    public void onTick(Minecraft mc) {
+        KeyMapping attack = mc.options.keyAttack;
+        boolean aimingAtBlock = mc.hitResult != null && mc.hitResult.getType() == HitResult.Type.BLOCK;
+        if (mc.player == null || mc.screen != null || !attack.isDown() || aimingAtBlock) {
+            pending = 0;
             return;
         }
-        clickThread = new Thread(() -> {
-            long interval = 1000 / CPS;
-            while (enabled) {
-                try {
-                    robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
-                    Thread.sleep(10);
-                    robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
-                    Thread.sleep(interval - 10);
-                } catch (InterruptedException e) {
-                    break;
-                } catch (Exception e) {}
-            }
-        }, "AutoClicker");
-        clickThread.setDaemon(true);
-        clickThread.start();
+        pending += CPS / 20.0;
+        InputConstants.Key key = InputConstants.getKey(attack.saveString());
+        while (pending >= 1.0) {
+            pending -= 1.0;
+            KeyMapping.click(key);
+        }
     }
 
-    private static void stop() {
-        if (clickThread != null) {
-            clickThread.interrupt();
-            clickThread = null;
-        }
+    @Override
+    protected void onDisable() {
+        pending = 0;
     }
 }

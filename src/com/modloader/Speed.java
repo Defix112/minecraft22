@@ -1,29 +1,32 @@
 package com.modloader;
 
-public class Speed {
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 
-    static volatile boolean enabled = false;
-    private static final float FAST = 0.15f;
-    private static final float NORMAL = 0.05f;
+public class Speed extends Module {
 
-    static void toggle(GameHook hook) {
-        enabled = !enabled;
-        Agent.writeLog("Speed: " + (enabled ? "ON" : "OFF"));
-        if (!enabled && hook != null && hook.isReady()) {
-            hook.setSpeed(NORMAL);
-        }
+    private static final double BOOSTED = 0.2;
+    private static final double VANILLA = 0.1;
+
+    public Speed() {
+        super("Speed", "Скорость бега x2", Category.MOVEMENT);
     }
 
-    static void tick(GameHook hook) {
-        if (enabled && hook != null && hook.isReady()) {
-            hook.setSpeed(FAST);
-        }
+    @Override
+    public void onTick(Minecraft mc) {
+        setBase(mc.player, BOOSTED);
     }
 
-    static void disable(GameHook hook) {
-        enabled = false;
-        if (hook != null && hook.isReady()) {
-            hook.setSpeed(NORMAL);
-        }
+    @Override
+    protected void onDisable() {
+        setBase(Minecraft.getInstance().player, VANILLA);
+    }
+
+    private static void setBase(LocalPlayer player, double value) {
+        if (player == null) return;
+        AttributeInstance speed = player.getAttribute(Attributes.MOVEMENT_SPEED);
+        if (speed != null && speed.getBaseValue() != value) speed.setBaseValue(value);
     }
 }

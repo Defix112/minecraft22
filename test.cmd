@@ -1,6 +1,6 @@
 @echo off
 chcp 437 >nul 2>&1
-title Minecraft Mod Injector
+title System Client Injector
 color 0a
 setlocal enabledelayedexpansion
 
@@ -13,8 +13,8 @@ set "JAVA_EXE="
 cls
 echo.
 echo  ==========================================
-echo       MINECRAFT MOD INJECTOR v3.0
-echo     In-game ClickGUI (Right Shift)
+echo       SYSTEM CLIENT INJECTOR v4.0
+echo   Minecraft 1.21.11 - menu: RIGHT SHIFT
 echo  ==========================================
 echo.
 if "!INJECTED!"=="1" goto :injected_menu

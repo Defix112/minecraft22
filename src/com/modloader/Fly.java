@@ -1,27 +1,28 @@
 package com.modloader;
 
-public class Fly {
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.player.Abilities;
 
-    static volatile boolean enabled = false;
+public class Fly extends Module {
 
-    static void toggle(GameHook hook) {
-        enabled = !enabled;
-        Agent.writeLog("Fly: " + (enabled ? "ON" : "OFF"));
-        if (!enabled && hook != null && hook.isReady()) {
-            hook.setFlying(false);
-        }
+    public Fly() {
+        super("Fly", "Полёт в выживании", Category.MOVEMENT);
     }
 
-    static void tick(GameHook hook) {
-        if (enabled && hook != null && hook.isReady()) {
-            hook.setFlying(true);
-        }
+    @Override
+    public void onTick(Minecraft mc) {
+        LocalPlayer player = mc.player;
+        if (player == null) return;
+        player.getAbilities().mayfly = true;
     }
 
-    static void disable(GameHook hook) {
-        enabled = false;
-        if (hook != null && hook.isReady()) {
-            hook.setFlying(false);
-        }
+    @Override
+    protected void onDisable() {
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null || player.isCreative() || player.isSpectator()) return;
+        Abilities abilities = player.getAbilities();
+        abilities.mayfly = false;
+        abilities.flying = false;
     }
 }

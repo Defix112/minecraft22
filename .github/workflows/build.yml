@@ -1,0 +1,45 @@
+name: Build agent
+
+on:
+  push:
+    branches: ["claude/brave-hopper-po6vnk"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-agent
+  cancel-in-progress: true
+
+env:
+  MC_VERSION: "1.21.11"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/cache@v4
+        with:
+          path: mc
+          key: mc-${{ env.MC_VERSION }}-${{ hashFiles('tools/Remap.java') }}
+
+      - name: Build agent.jar
+        run: bash build.sh
+
+      - name: Publish to Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest out/agent.jar out/test.cmd \
+            --target "$GITHUB_SHA" \
+            --title "System Client for Minecraft $MC_VERSION" \
+            --notes "Скачай agent.jar и test.cmd в одну папку. Запусти Minecraft $MC_VERSION, зайди в мир, запусти test.cmd. В игре нажми правый Shift. Собрано из коммита $GITHUB_SHA."
