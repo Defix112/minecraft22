@@ -22,7 +22,7 @@ if not defined JAVA_EXE for /d %%d in ("C:\Program Files\Microsoft\jdk-*") do if
 cls
 echo.
 echo  ==========================================
-echo       SYSTEM CLIENT  v5.2
+echo       SYSTEM CLIENT  v5.3
 echo   Minecraft 1.21.11  ^|  RIGHT SHIFT = GUI
 echo  ==========================================
 echo.
@@ -81,10 +81,14 @@ echo  ==========================================
 echo.
 if not exist "!AGENT_JAR!" (
     echo   Downloading agent.jar...
-    powershell -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('!RELEASE_URL!','!AGENT_JAR!')"
+    powershell -Command "Invoke-WebRequest -Uri '!RELEASE_URL!' -OutFile '!AGENT_JAR!' -UseBasicParsing"
     if not exist "!AGENT_JAR!" (
-        echo   [-] Download failed. Check internet connection.
-        timeout /t 4 /nobreak >nul
+        echo   [-] Download failed.
+        echo   Try downloading manually:
+        echo   !RELEASE_URL!
+        echo   Place agent.jar next to test.cmd
+        echo.
+        timeout /t 6 /nobreak >nul
         goto :menu
     )
     echo   [+] agent.jar downloaded.
@@ -136,7 +140,7 @@ echo  ==========================================
 echo   PANIC - Removing traces...
 echo  ==========================================
 echo.
->>"%TEMP%\clickgui_cmd.txt" echo 0
+>"%TEMP%\clickgui_cmd.txt" echo 0
 echo   [1/4] Signal sent to agent...
 timeout /t 2 /nobreak >nul
 del /f /q "!AGENT_JAR!" >nul 2>&1
