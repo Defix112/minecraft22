@@ -1,21 +1,17 @@
 package com.modloader;
 
 import java.lang.instrument.Instrumentation;
+import java.lang.reflect.*;
 import java.io.*;
 import java.nio.file.*;
-import java.util.*;
+import java.util.jar.JarFile;
 
 public class Agent {
 
     private static volatile boolean loaded = false;
     private static volatile boolean running = true;
     private static GameHook hook;
-
-    private static volatile boolean flyEnabled = false;
-    private static volatile boolean speedEnabled = false;
-    private static volatile boolean sprintEnabled = false;
-    private static volatile boolean autoClickEnabled = false;
-    private static volatile boolean fullbrightEnabled = false;
+    private static Instrumentation instrumentation;
 
     private static Process sprintProcess;
     private static Process autoClickProcess;
@@ -28,13 +24,22 @@ public class Agent {
             return;
         }
         loaded = true;
+        instrumentation = inst;
 
         System.out.println("[Agent] ============================");
-        System.out.println("[Agent] INJECTED OK - CMD control");
+        System.out.println("[Agent] INJECTED OK - In-game GUI");
         System.out.println("[Agent] ============================");
 
         new Thread(() -> {
             try {
+                if (args != null && !args.isEmpty()) {
+                    File jarFile = new File(args);
+                    if (jarFile.exists()) {
+                        inst.appendToBootstrapClassLoaderSearch(new JarFile(jarFile));
+                        writeLog("Added to bootstrap classloader: " + jarFile.getName());
+                    }
+                }
+
                 hook = new GameHook(inst);
                 writeLog("GameHook created, scanning...");
 
@@ -52,20 +57,212 @@ public class Agent {
 
                 if (found) {
                     writeLog("GameHook READY");
-                    writeStatus("READY");
                 } else {
-                    writeLog("GameHook failed - join a world first, then press [9] Rescan");
-                    writeStatus("NEED_WORLD");
+                    writeLog("GameHook failed - join a world first, then rescan");
                 }
 
-                startCommandListener();
+                long windowHandle = findWindowHandle(inst);
+                if (windowHandle == 0) {
+                    writeLog("GLFW window handle not found");
+                    writeStatus("ERROR: no window");
+                    return;
+                }
+                writeLog("GLFW window handle: " + windowHandle);
+
+                boolean glOk = Overlay.init(windowHandle);
+                if (!glOk) {
+                    writeLog("Overlay init failed");
+                    writeStatus("ERROR: GL init");
+                    return;
+                }
+
+                setupKeyCallback(windowHandle, inst);
+
+                inst.addTransformer(new HookTransformer(), true);
+                writeLog("Transformer registered");
+
+                Class<?> windowClass = findWindowClass(inst);
+                if (windowClass != null) {
+                    inst.retransformClasses(windowClass);
+                    writeLog("Window class retransformed OK");
+                } else {
+                    writeLog("Window class not found for retransform");
+                }
+
+                writeStatus("READY - RShift to open GUI");
                 startModuleTick();
+                startCommandListener();
 
             } catch (Throwable t) {
                 writeLog("Init error: " + t.getClass().getSimpleName() + ": " + t.getMessage());
                 writeStatus("ERROR");
             }
         }, "Agent-Init").start();
+    }
+
+    private static long findWindowHandle(Instrumentation inst) {
+        try {
+            Class<?> windowClass = findWindowClass(inst);
+            if (windowClass == null) return 0;
+
+            Object windowInstance = findWindowInstance(inst, windowClass);
+            if (windowInstance == null) {
+                writeLog("Window instance not found");
+                return 0;
+            }
+
+            for (Field f : windowClass.getDeclaredFields()) {
+                if (f.getType() == long.class && !Modifier.isStatic(f.getModifiers())) {
+                    try {
+                        f.setAccessible(true);
+                        long val = f.getLong(windowInstance);
+                        if (val != 0) {
+                            writeLog("Window handle field: " + f.getName() + " = " + val);
+                            return val;
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        } catch (Throwable t) {
+            writeLog("findWindowHandle error: " + t);
+        }
+        return 0;
+    }
+
+    private static Class<?> findWindowClass(Instrumentation inst) {
+        for (Class<?> cls : inst.getAllLoadedClasses()) {
+            if ("com.mojang.blaze3d.platform.Window".equals(cls.getName())) {
+                return cls;
+            }
+        }
+        return null;
+    }
+
+    private static Object findWindowInstance(Instrumentation inst, Class<?> windowClass) {
+        for (Class<?> cls : inst.getAllLoadedClasses()) {
+            String n = cls.getName();
+            if (n.startsWith("java.") || n.startsWith("javax.") || n.startsWith("sun.")
+                || n.startsWith("com.sun.") || n.startsWith("jdk.") || n.startsWith("org.")
+                || n.startsWith("com.google") || n.startsWith("io.") || n.startsWith("it.")
+                || n.contains("$")) continue;
+
+            Field[] fields = cls.getDeclaredFields();
+            if (fields.length < 35) continue;
+
+            for (Field f : fields) {
+                if (f.getType() == cls && Modifier.isStatic(f.getModifiers())) {
+                    try {
+                        f.setAccessible(true);
+                        Object singleton = f.get(null);
+                        if (singleton == null) continue;
+
+                        for (Field wf : cls.getDeclaredFields()) {
+                            if (wf.getType() == windowClass && !Modifier.isStatic(wf.getModifiers())) {
+                                wf.setAccessible(true);
+                                Object win = wf.get(singleton);
+                                if (win != null) {
+                                    writeLog("Found Window in " + cls.getName() + "." + wf.getName());
+                                    return win;
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void setupKeyCallback(long windowHandle, Instrumentation inst) {
+        try {
+            ClassLoader cl = Thread.currentThread().getContextClassLoader();
+            if (cl == null) cl = ClassLoader.getSystemClassLoader();
+
+            Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW", true, cl);
+            Class<?> callbackI = Class.forName("org.lwjgl.glfw.GLFWKeyCallbackI", true, cl);
+
+            Method setCallback = glfw.getMethod("glfwSetKeyCallback", long.class, callbackI);
+
+            Object oldCallback = setCallback.invoke(null, windowHandle, (Object) null);
+            writeLog("Old key callback: " + (oldCallback == null ? "null" : oldCallback.getClass().getName()));
+
+            Object proxy = Proxy.newProxyInstance(cl, new Class<?>[]{callbackI},
+                (p, method, methodArgs) -> {
+                    if ("invoke".equals(method.getName()) && methodArgs != null && methodArgs.length == 5) {
+                        long win = (Long) methodArgs[0];
+                        int key = (Integer) methodArgs[1];
+                        int scancode = (Integer) methodArgs[2];
+                        int action = (Integer) methodArgs[3];
+                        int mods = (Integer) methodArgs[4];
+
+                        Overlay.onKey(key, action);
+
+                        if (Overlay.visible) {
+                            return null;
+                        }
+
+                        if (oldCallback != null) {
+                            try {
+                                Method invoke = oldCallback.getClass().getMethod("invoke",
+                                    long.class, int.class, int.class, int.class, int.class);
+                                invoke.invoke(oldCallback, win, key, scancode, action, mods);
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                    return null;
+                });
+
+            setCallback.invoke(null, windowHandle, proxy);
+            writeLog("Key callback installed");
+
+        } catch (Throwable t) {
+            writeLog("Key callback error: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+    }
+
+    public static void onModuleToggle(int cat, int mod) {
+        if (cat == 0 && mod == 0) {
+            writeLog("Fly: " + (Overlay.flyOn ? "ON" : "OFF"));
+            if (!Overlay.flyOn && hook != null && hook.isReady()) {
+                hook.setFlying(false);
+            }
+        } else if (cat == 0 && mod == 1) {
+            writeLog("Speed: " + (Overlay.speedOn ? "ON" : "OFF"));
+            if (!Overlay.speedOn && hook != null && hook.isReady()) {
+                hook.setSpeed(0.05f);
+            }
+        } else if (cat == 0 && mod == 2) {
+            writeLog("Sprint: " + (Overlay.sprintOn ? "ON" : "OFF"));
+            if (Overlay.sprintOn) startSprint(); else stopSprint();
+        } else if (cat == 1 && mod == 0) {
+            writeLog("AutoClick: " + (Overlay.autoClickOn ? "ON" : "OFF"));
+            if (Overlay.autoClickOn) startAutoClick(); else stopAutoClick();
+        } else if (cat == 2 && mod == 0) {
+            writeLog("Fullbright: " + (Overlay.fullbrightOn ? "ON" : "OFF"));
+            setGamma(Overlay.fullbrightOn ? 16.0 : 1.0);
+        }
+        updateStatus();
+    }
+
+    private static void startModuleTick() {
+        Thread t = new Thread(() -> {
+            while (running) {
+                try {
+                    Thread.sleep(50);
+                    if (hook == null || !hook.isReady()) {
+                        if (hook != null) hook.refreshPlayer();
+                        continue;
+                    }
+                    hook.refreshPlayer();
+                    if (!hook.isReady()) continue;
+
+                    if (Overlay.flyOn) hook.setFlying(true);
+                    if (Overlay.speedOn) hook.setSpeed(0.15f);
+                } catch (Exception e) {}
+            }
+        }, "Agent-ModuleTick");
+        t.setDaemon(true);
+        t.start();
     }
 
     private static void startCommandListener() {
@@ -81,78 +278,33 @@ public class Agent {
                     if (cmd.isEmpty()) continue;
 
                     writeLog("CMD received: " + cmd);
-                    processCommand(cmd);
+                    if ("0".equals(cmd)) {
+                        doPanic();
+                    } else if ("9".equals(cmd)) {
+                        if (hook != null) {
+                            boolean ok = hook.scan();
+                            writeLog("Rescan: " + (ok ? "OK" : "FAIL"));
+                        }
+                    }
                 } catch (InterruptedException e) {
                     break;
-                } catch (Exception e) {
-                    // ignore
-                }
+                } catch (Exception e) {}
             }
         }, "Agent-CmdListener");
         t.setDaemon(true);
         t.start();
     }
 
-    private static void processCommand(String cmd) {
-        switch (cmd) {
-            case "0":
-                doPanic();
-                break;
-            case "1":
-                flyEnabled = !flyEnabled;
-                writeLog("Fly: " + (flyEnabled ? "ON" : "OFF"));
-                if (!flyEnabled && hook != null && hook.isReady()) {
-                    hook.setFlying(false);
-                }
-                updateStatus();
-                break;
-            case "2":
-                speedEnabled = !speedEnabled;
-                writeLog("Speed: " + (speedEnabled ? "ON" : "OFF"));
-                if (!speedEnabled && hook != null && hook.isReady()) {
-                    hook.setSpeed(0.05f);
-                }
-                updateStatus();
-                break;
-            case "3":
-                sprintEnabled = !sprintEnabled;
-                writeLog("Sprint: " + (sprintEnabled ? "ON" : "OFF"));
-                if (sprintEnabled) startSprint(); else stopSprint();
-                updateStatus();
-                break;
-            case "4":
-                autoClickEnabled = !autoClickEnabled;
-                writeLog("AutoClick: " + (autoClickEnabled ? "ON" : "OFF"));
-                if (autoClickEnabled) startAutoClick(); else stopAutoClick();
-                updateStatus();
-                break;
-            case "5":
-                fullbrightEnabled = !fullbrightEnabled;
-                writeLog("Fullbright: " + (fullbrightEnabled ? "ON" : "OFF"));
-                setGamma(fullbrightEnabled ? 16.0 : 1.0);
-                updateStatus();
-                break;
-            case "9":
-                if (hook != null) {
-                    boolean ok = hook.scan();
-                    writeLog("Rescan: " + (ok ? "OK" : "FAIL"));
-                    writeStatus(ok ? "READY" : "NEED_WORLD");
-                }
-                break;
-            default:
-                writeLog("Unknown: " + cmd);
-        }
-    }
-
     private static void doPanic() {
         writeLog("PANIC activated");
         running = false;
 
-        flyEnabled = false;
-        speedEnabled = false;
-        autoClickEnabled = false;
-        sprintEnabled = false;
-        fullbrightEnabled = false;
+        Overlay.flyOn = false;
+        Overlay.speedOn = false;
+        Overlay.sprintOn = false;
+        Overlay.autoClickOn = false;
+        Overlay.fullbrightOn = false;
+        Overlay.visible = false;
 
         if (hook != null && hook.isReady()) {
             hook.setFlying(false);
@@ -172,29 +324,6 @@ public class Agent {
 
         writeStatus("PANIC_DONE");
         System.out.println("[Agent] PANIC - all disabled and cleaned");
-    }
-
-    private static void startModuleTick() {
-        Thread t = new Thread(() -> {
-            while (running) {
-                try {
-                    Thread.sleep(50);
-                    if (hook == null || !hook.isReady()) {
-                        if (hook != null) hook.refreshPlayer();
-                        continue;
-                    }
-                    hook.refreshPlayer();
-                    if (!hook.isReady()) continue;
-
-                    if (flyEnabled) hook.setFlying(true);
-                    if (speedEnabled) hook.setSpeed(0.15f);
-                } catch (Exception e) {
-                    // ignore
-                }
-            }
-        }, "Agent-ModuleTick");
-        t.setDaemon(true);
-        t.start();
     }
 
     private static void startSprint() {
@@ -284,11 +413,11 @@ public class Agent {
 
     private static void updateStatus() {
         StringBuilder sb = new StringBuilder();
-        if (flyEnabled) sb.append("Fly:ON ");
-        if (speedEnabled) sb.append("Speed:ON ");
-        if (sprintEnabled) sb.append("Sprint:ON ");
-        if (autoClickEnabled) sb.append("AutoClick:ON ");
-        if (fullbrightEnabled) sb.append("Fullbright:ON ");
+        if (Overlay.flyOn) sb.append("Fly:ON ");
+        if (Overlay.speedOn) sb.append("Speed:ON ");
+        if (Overlay.sprintOn) sb.append("Sprint:ON ");
+        if (Overlay.autoClickOn) sb.append("AutoClick:ON ");
+        if (Overlay.fullbrightOn) sb.append("Fullbright:ON ");
         if (sb.length() == 0) sb.append("All OFF");
         writeStatus(sb.toString().trim());
     }

@@ -13,11 +13,11 @@ set "JAVA_EXE="
 cls
 echo.
 echo  ==========================================
-echo       MINECRAFT MOD INJECTOR v2.0
-echo     In-game injection + CMD control
+echo       MINECRAFT MOD INJECTOR v3.0
+echo     In-game ClickGUI (Right Shift)
 echo  ==========================================
 echo.
-if "!INJECTED!"=="1" goto :mod_menu
+if "!INJECTED!"=="1" goto :injected_menu
 if defined MC_PID (
     echo   [OK] Minecraft found - PID: !MC_PID!
 ) else (
@@ -40,12 +40,14 @@ if "!choice!"=="1" (
 )
 goto :menu
 
-:mod_menu
+:injected_menu
 cls
 echo.
 echo  ==========================================
-echo       MOD CONTROL PANEL
+echo       INJECTED SUCCESSFULLY!
 echo  ==========================================
+echo.
+echo   Press RIGHT SHIFT in game to open GUI
 echo.
 if exist "%TEMP%\clickgui_status.txt" (
     set /p STATUS=<"%TEMP%\clickgui_status.txt"
@@ -55,34 +57,14 @@ if exist "%TEMP%\clickgui_status.txt" (
 )
 echo.
 echo  ------------------------------------------
-echo   IN-GAME (modifies game memory):
-echo     [1] Fly        - fly in survival
-echo     [2] Speed      - move 3x faster
-echo.
-echo   EXTERNAL (Windows API):
-echo     [3] Sprint     - always sprint
-echo     [4] AutoClick  - fast click 12 CPS
-echo     [5] Fullbright - max brightness
-echo.
-echo  ------------------------------------------
-echo   [9] Rescan  - find player if changed world
-echo   [0] PANIC   - disable all + delete traces
+echo   [0] PANIC - disable all + delete traces
+echo   [9] Close this window (mod stays active)
 echo  ==========================================
 echo.
 set /p "choice=  >> "
 if "!choice!"=="0" goto :panic
-if "!choice!"=="9" (
-    >"%TEMP%\clickgui_cmd.txt" echo 9
-    echo   Rescanning...
-    timeout /t 2 /nobreak >nul
-    goto :menu
-)
-if "!choice!" geq "1" if "!choice!" leq "5" (
-    >"%TEMP%\clickgui_cmd.txt" echo !choice!
-    timeout /t 1 /nobreak >nul
-    goto :menu
-)
-goto :menu
+if "!choice!"=="9" goto :eof
+goto :injected_menu
 
 :panic
 cls
@@ -215,8 +197,8 @@ if !errorlevel! neq 0 goto :inject_fail
 set "INJECTED=1"
 echo.
 echo   [+] Injection successful!
-echo   Waiting for agent to scan game...
-timeout /t 3 /nobreak >nul
+echo   Waiting for agent to initialize...
+timeout /t 5 /nobreak >nul
 
 if exist "%TEMP%\clickgui_log.txt" (
     echo.
@@ -225,7 +207,7 @@ if exist "%TEMP%\clickgui_log.txt" (
 )
 
 echo.
-echo   Press any key for module control...
+echo   Press any key to continue...
 pause >nul
 goto :menu
 
