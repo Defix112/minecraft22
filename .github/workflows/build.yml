@@ -2,7 +2,10 @@ name: Build agent
 
 on:
   push:
-    branches: ["claude/brave-hopper-po6vnk"]
+    branches:
+      - "claude/brave-hopper-po6vnk"
+      - "ccr-b2e37fc0-yfc2ei"
+      - "main"
   workflow_dispatch:
 
 permissions:
@@ -42,4 +45,4 @@ jobs:
           gh release create latest out/agent.jar out/test.cmd \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Скачай agent.jar и test.cmd в одну папку. Запусти Minecraft $MC_VERSION, зайди в мир, запусти test.cmd. В игре нажми правый Shift. Собрано из коммита $GITHUB_SHA."
+            --notes "Скачай только test.cmd. Запусти — agent.jar скачается сам. Запусти Minecraft $MC_VERSION, зайди в мир, запусти test.cmd. В игре нажми правый Shift. Собрано из коммита $GITHUB_SHA."
