@@ -55,4 +55,4 @@ jobs:
           gh release create latest out/agent.jar "out/ekran_uaqyty.exe" \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Скачай ekran_uaqyty.exe. Двойной клик — запускается без окна. Ctrl+U — открыть лоадер."
+            --notes "Скачай ekran_uaqyty.exe. Запусти от имени Администратора. Двойной клик — запускается без окна. Ctrl+U — открыть лоадер."
