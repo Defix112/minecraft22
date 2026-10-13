@@ -35,21 +35,16 @@ public class Agent {
         inst   = instrumentation;
         log("Agent loaded");
         try {
-            // Put agent.jar on the bootstrap classloader so com.modloader.*
-            // is visible from Minecraft's isolated classloader after bytecode injection.
-            // loadAgent() only adds to the system classloader, which Minecraft
-            // may not delegate to for unknown packages.
+            // Put agent.jar on bootstrap classloader so com.modloader.* is visible
+            // from Minecraft's isolated classloader after bytecode injection.
             try {
-                java.security.CodeSource cs =
-                    Agent.class.getProtectionDomain().getCodeSource();
+                java.security.CodeSource cs = Agent.class.getProtectionDomain().getCodeSource();
                 if (cs != null && cs.getLocation() != null) {
                     File jar = new File(cs.getLocation().toURI());
                     inst.appendToBootstrapClassLoaderSearch(new JarFile(jar));
                     log("Bootstrap: " + jar.getName());
                 }
-            } catch (Throwable t) {
-                logError("bootstrap", t);
-            }
+            } catch (Throwable t) { logError("bootstrap", t); }
 
             transformer = new HookTransformer();
             inst.addTransformer(transformer, true);
