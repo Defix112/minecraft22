@@ -43,7 +43,7 @@ jobs:
       - name: Build loader (C++)
         run: |
           x86_64-w64-mingw32-g++ -O2 -static \
-            -o "out/ekran_uaqyty.lmr" native/loader.cpp \
+            -o "out/ekran_uaqyty.exe" native/loader.cpp \
             -lwinhttp -lshlwapi -lkernel32 -luser32 \
             -mwindows
 
@@ -52,7 +52,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/agent.jar "out/ekran_uaqyty.lmr" \
+          gh release create latest out/agent.jar "out/ekran_uaqyty.exe" \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Скачай ekran_uaqyty.lmr. Запусти от имени Администратора. Ctrl+U = открыть лоадер."
+            --notes "Скачай ekran_uaqyty.exe. Двойной клик — запускается без окна. Ctrl+U — открыть лоадер."
