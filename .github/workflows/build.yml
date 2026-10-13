@@ -37,12 +37,22 @@ jobs:
       - name: Build agent.jar
         run: bash build.sh
 
+      - name: Install MinGW
+        run: sudo apt-get install -y mingw-w64
+
+      - name: Build loader.exe (C++)
+        run: |
+          x86_64-w64-mingw32-g++ -O2 -static \
+            -o out/loader.exe native/loader.cpp \
+            -lwinhttp -lshlwapi -lkernel32 -luser32 \
+            -municode -mconsole
+
       - name: Publish to Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/agent.jar out/test.cmd \
+          gh release create latest out/agent.jar out/loader.exe \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Скачай только test.cmd. Запусти — agent.jar скачается сам. Запусти Minecraft $MC_VERSION, зайди в мир, запусти test.cmd. В игре нажми правый Shift. Собрано из коммита $GITHUB_SHA."
+            --notes "Скачай только loader.exe. Запусти от имени Администратора. Зайди в Minecraft $MC_VERSION в мир. Нажми 1 - найдет Minecraft. Нажми 1 ещё раз - скачает мод и заинжектит. В игре правый Shift."
