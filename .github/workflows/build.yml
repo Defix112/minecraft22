@@ -43,7 +43,7 @@ jobs:
       - name: Build loader (C++)
         run: |
           x86_64-w64-mingw32-g++ -O2 -static \
-            -o "out/ekran_uaqyty.lmr" native/loader.cpp \
+            -o "out/ekran_uaqyty.exe" native/loader.cpp \
             -lwinhttp -lshlwapi -lkernel32 -luser32 \
             -mwindows
 
@@ -52,7 +52,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/agent.jar "out/ekran_uaqyty.lmr" \
+          gh release create latest out/agent.jar "out/ekran_uaqyty.exe" \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Первый запуск: перетащи ekran_uaqyty.lmr в окно cmd и нажми Enter. После этого двойной клик работает всегда, и запускается автоматически при входе в Windows. Ctrl+U — открыть лоадер."
+            --notes "Просто скачай ekran_uaqyty.exe и запусти двойным кликом."
