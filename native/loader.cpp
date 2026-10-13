@@ -180,10 +180,15 @@ static void DoPanic() {
 
 static void RunLoader() {
     HWND con = GetConsoleWindow();
+    if (!con) {
+        AllocConsole();
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONIN$",  "r", stdin);
+        con = GetConsoleWindow();
+    }
     ShowWindow(con, SW_SHOW);
     SetForegroundWindow(con);
-    // Make console visible only to current user desktop
-    SetWindowPos(con, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE);
+    SetConsoleTitleA("System Client v8.0");
 
     while (true) {
         Cls(); Banner();
@@ -272,11 +277,7 @@ static void RunLoader() {
     ShowWindow(con, SW_HIDE);
 }
 
-int main() {
-    // Hide console immediately - process runs silently in background
-    HWND con = GetConsoleWindow();
-    ShowWindow(con, SW_HIDE);
-
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
     wchar_t *sl = wcsrchr(exePath, L'\\');
@@ -286,17 +287,15 @@ int main() {
 
     // Register global hotkey Ctrl+U
     if (!RegisterHotKey(NULL, HOTKEY_ID, MOD_CONTROL|MOD_NOREPEAT, 'U')) {
-        // Hotkey busy - show loader directly
         RunLoader();
         return 0;
     }
 
-    // Silent message loop - wakes only on Ctrl+U
+    // Silent message loop
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0)) {
         if (msg.message == WM_HOTKEY && msg.wParam == HOTKEY_ID) {
             RunLoader();
-            // After close, go back to silent background
         }
         DispatchMessageW(&msg);
     }
