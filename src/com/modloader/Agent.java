@@ -22,6 +22,8 @@ public class Agent {
     private static final Set<String>   reportedErrors = ConcurrentHashMap.newKeySet();
     private static final List<Class<?>> hookedClasses  = new ArrayList<>();
 
+    static volatile File agentJarFile;
+
     private static volatile boolean   loaded;
     private static Instrumentation    inst;
     private static HookTransformer    transformer;
@@ -47,6 +49,12 @@ public class Agent {
                 }
             } catch (Throwable t) { logError("systemcl", t); }
 
+            try {
+                java.security.CodeSource cs2 = Agent.class.getProtectionDomain().getCodeSource();
+                if (cs2 != null && cs2.getLocation() != null)
+                    agentJarFile = new File(cs2.getLocation().toURI());
+            } catch (Throwable ignored) {}
+
             transformer = new HookTransformer();
             inst.addTransformer(transformer, true);
 
@@ -58,6 +66,7 @@ public class Agent {
             inst.retransformClasses(hookedClasses.toArray(new Class<?>[0]));
 
             Hooks.active = true;
+            System.setProperty("sc.active", "1");
             writeStatus("READY - press RIGHT SHIFT in game");
             log("READY - press RIGHT SHIFT in game");
             startCommandListener();

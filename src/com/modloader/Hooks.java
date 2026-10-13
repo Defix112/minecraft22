@@ -11,14 +11,21 @@ public final class Hooks {
     private static final int KEY_RIGHT_SHIFT = 344;
     private static final int GLFW_PRESS = 1;
 
+    // System property is visible across all classloaders — avoids split-identity bug
+    private static final String PROP = "sc.active";
+
     public static volatile boolean active;
     static volatile boolean panicRequested;
     private static volatile boolean openRequested;
 
     private Hooks() {}
 
+    private static boolean isActive() {
+        return active || "1".equals(System.getProperty(PROP));
+    }
+
     public static void onTick() {
-        if (!active) return;
+        if (!isActive()) return;
         try {
             Minecraft mc = Minecraft.getInstance();
             if (panicRequested) {
@@ -37,7 +44,7 @@ public final class Hooks {
     }
 
     public static void onHud(GuiGraphics graphics, DeltaTracker deltaTracker) {
-        if (!active) return;
+        if (!isActive()) return;
         try {
             Hud.render(graphics);
         } catch (Throwable t) {
@@ -47,7 +54,7 @@ public final class Hooks {
 
     // The screen is opened on the next tick so this key press is not also delivered to the new screen.
     public static void onKey(long window, int action, KeyEvent event) {
-        if (!active) return;
+        if (!isActive()) return;
         try {
             if (action == GLFW_PRESS && event.key() == KEY_RIGHT_SHIFT) {
                 openRequested = true;
