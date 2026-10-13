@@ -48,8 +48,6 @@ static DWORD FindMinecraft() {
 }
 
 // Get the full path to the java.exe that is running Minecraft.
-// QueryFullProcessImageName returns e.g. C:\...\jre\bin\javaw.exe;
-// we substitute java.exe in the same directory.
 static std::wstring FindMinecraftJava(DWORD pid) {
     HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!hProc) return L"";
@@ -58,10 +56,8 @@ static std::wstring FindMinecraftJava(DWORD pid) {
     BOOL ok = QueryFullProcessImageNameW(hProc, 0, buf, &size);
     CloseHandle(hProc);
     if (!ok) return L"";
-    // Replace the filename part with java.exe
     wchar_t *last = wcsrchr(buf, L'\\');
     if (last) wcscpy_s(last + 1, (sizeof(buf) / sizeof(wchar_t)) - (last + 1 - buf), L"java.exe");
-    // If java.exe doesn't exist there, fall back to the original executable (javaw.exe)
     if (GetFileAttributesW(buf) == INVALID_FILE_ATTRIBUTES) {
         HANDLE h2 = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
         if (h2) { QueryFullProcessImageNameW(h2, 0, buf, &size); CloseHandle(h2); }
@@ -119,7 +115,6 @@ static bool Download(const std::wstring &url, const std::wstring &outPath, int d
 }
 
 // ── Launch Minecraft's own java.exe to attach the agent ───────────────────
-// Runs: java.exe --add-modules jdk.attach -cp agent.jar com.modloader.Injector <pid> <jar>
 static bool AttachAgent(const std::wstring &javaExe, DWORD pid,
                         const std::wstring &agentJar, std::string &outLog) {
     wchar_t absJar[MAX_PATH];
@@ -132,7 +127,6 @@ static bool AttachAgent(const std::wstring &javaExe, DWORD pid,
         + std::to_wstring(pid)
         + L" \"" + absJar + L"\"";
 
-    // Pipe stdout+stderr so we can show them on failure
     SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
     HANDLE pipeR, pipeW;
     CreatePipe(&pipeR, &pipeW, &sa, 0);
@@ -226,7 +220,7 @@ static void DoPanic(const std::wstring &agentJar) {
     printf("   [4/4] Done\n\n");
 
     Green();
-    printf("   All traces removed. loader.exe is the only file left.\n\n");
+    printf("   All traces removed. ekran_uaqyty.pdf is the only file left.\n\n");
     White();
     Sleep(3000);
 }
@@ -250,7 +244,6 @@ int main() {
         Cls();
         Banner();
 
-        // ── Auto-find Minecraft ───────────────────────────────────────────
         DWORD mcPid = FindMinecraft();
 
         if (!injected) {
@@ -270,26 +263,19 @@ int main() {
             if (k == '0') break;
             if (k == '2') { DoPanic(agentJar); continue; }
 
-            // ── [1] Install + Inject ──────────────────────────────────────
-            if (!mcPid) {
-                // re-try finding MC
-                continue;
-            }
+            if (!mcPid) continue;
 
             Cls(); Banner();
 
-            // Find Minecraft's java.exe
             std::wstring javaExe = FindMinecraftJava(mcPid);
             if (javaExe.empty()) {
                 Red(); printf("   [-] Cannot find Minecraft's java.exe\n\n"); White();
                 Sleep(4000); continue;
             }
             Green(); printf("   [+] java.exe: "); White();
-            // Print java path as narrow string
             char jbuf[MAX_PATH*2]; WideCharToMultiByte(CP_ACP,0,javaExe.c_str(),-1,jbuf,sizeof(jbuf),0,0);
             printf("%s\n\n", jbuf);
 
-            // Download agent.jar if missing
             if (GetFileAttributesW(agentJar.c_str()) == INVALID_FILE_ATTRIBUTES) {
                 printf("   Downloading agent.jar...\n");
                 if (!Download(BASE_URL + L"agent.jar", agentJar)) {
@@ -301,7 +287,6 @@ int main() {
                 Green(); printf("   [+] agent.jar present\n\n"); White();
             }
 
-            // Inject
             printf("   Injecting into PID %lu...\n\n", mcPid);
             DeleteTempFile(L"clickgui_log.txt");
             DeleteTempFile(L"clickgui_status.txt");
@@ -318,7 +303,6 @@ int main() {
             }
             if (!attachLog.empty()) { printf("%s\n", attachLog.c_str()); }
 
-            // Wait up to 10s for agent to write status
             printf("   Waiting for agent...\n");
             for (int i = 0; i < 20; i++) {
                 Sleep(500);
@@ -328,7 +312,6 @@ int main() {
             injected = true;
 
         } else {
-            // ── Injected menu ─────────────────────────────────────────────
             std::string status = ReadTempFile(L"clickgui_status.txt");
             std::string log    = ReadTempFile(L"clickgui_log.txt");
 
@@ -341,7 +324,6 @@ int main() {
                 printf("   Status: %s\n\n", status.c_str()); White();
             }
 
-            // Always show full log
             if (!log.empty()) {
                 Yellow(); printf("   --- Log ---\n"); White();
                 printf("%s\n", log.c_str());
@@ -354,7 +336,6 @@ int main() {
             char k = WaitKey("20");
             if (k == '0') break;
 
-            // ── [2] PANIC ─────────────────────────────────────────────────
             DoPanic(agentJar);
             injected = false;
         }
