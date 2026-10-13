@@ -14,6 +14,9 @@ public final class GameState {
     // C++ writes a module name here; onTick toggles it and clears
     public static volatile String pendingToggle = "";
 
+    // C++ sets true to request panic; onTick runs Panic and clears
+    public static volatile boolean panicRequested;
+
     public static volatile boolean active;
 
     private GameState() {}

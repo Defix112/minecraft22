@@ -30,8 +30,9 @@ public final class Hooks {
         if (!isActive()) return;
         try {
             Minecraft mc = Minecraft.getInstance();
-            if (panicRequested) {
+            if (panicRequested || GameState.panicRequested) {
                 panicRequested = false;
+                GameState.panicRequested = false;
                 Panic.run();
                 return;
             }

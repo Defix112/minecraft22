@@ -4,7 +4,8 @@
  * renders the module list and player coords via GDI,
  * and toggles features by writing to GameState.pendingToggle via JNI.
  *
- * INSERT  = open/close overlay GUI
+ * DELETE     = panic (clean all traces, always)
+ * INSERT     = open/close overlay GUI
  * Arrow keys + Enter = navigate and toggle modules
  */
 
@@ -15,7 +16,7 @@
 #include <vector>
 #include <sstream>
 
-// ── Global state ────────────────────────────────────────────────────────────────────
+// ── Global state ─────────────────────────────────────────────────────────────────────────────
 static HINSTANCE  g_hInst     = nullptr;
 static HWND       g_overlay   = nullptr;  // our transparent window
 static HWND       g_mcWindow  = nullptr;  // Minecraft GLFW window
@@ -28,7 +29,7 @@ static int        g_selected  = 0;
 struct ModEntry { std::string name; bool enabled; };
 static std::vector<ModEntry> g_modules;
 
-// ── JNI helpers ────────────────────────────────────────────────────────────────────
+// ── JNI helpers ────────────────────────────────────────────────────────────────────────────
 static JNIEnv* GetEnv() {
     JNIEnv* env = nullptr;
     if (g_jvm) g_jvm->AttachCurrentThreadAsDaemon((void**)&env, nullptr);
@@ -61,7 +62,19 @@ static double GetStaticDouble(JNIEnv* env, jclass cls, const char* field) {
     return env->GetStaticDoubleField(cls, fid);
 }
 
-// ── Parse module states "Name:1,Name:0,..." ──────────────────────────────────────────
+static bool GetStaticBool(JNIEnv* env, jclass cls, const char* field) {
+    jfieldID fid = env->GetStaticFieldID(cls, field, "Z");
+    if (!fid) return false;
+    return env->GetStaticBooleanField(cls, fid) != 0;
+}
+
+static void SetStaticBool(JNIEnv* env, jclass cls, const char* field, bool value) {
+    jfieldID fid = env->GetStaticFieldID(cls, field, "Z");
+    if (!fid) return;
+    env->SetStaticBooleanField(cls, fid, value ? JNI_TRUE : JNI_FALSE);
+}
+
+// ── Parse module states "Name:1,Name:0,..." ──────────────────────────────────────────────
 static void ParseModules(const std::string& s) {
     g_modules.clear();
     std::stringstream ss(s);
@@ -77,7 +90,7 @@ static void ParseModules(const std::string& s) {
     if (g_selected >= (int)g_modules.size()) g_selected = 0;
 }
 
-// ── GDI rendering ────────────────────────────────────────────────────────────────────
+// ── GDI rendering ────────────────────────────────────────────────────────────────────────────
 static COLORREF COL_BG      = RGB(10, 10, 20);
 static COLORREF COL_BORDER  = RGB(80, 120, 255);
 static COLORREF COL_ON      = RGB(80, 255, 100);
@@ -145,9 +158,12 @@ static void RenderOverlay(HDC hdc, int W, int H,
         DrawText_(hdc, buf, px2 + 6, iy + 1, col);
         iy += 22;
     }
+
+    // Hint at bottom
+    DrawText_(hdc, "  DELETE = panic", px2 + 6, iy + 4, RGB(255, 80, 80));
 }
 
-// ── Overlay window proc ───────────────────────────────────────────────────────────────────
+// ── Overlay window proc ───────────────────────────────────────────────────────────────────────────
 static LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_PAINT: {
@@ -162,15 +178,18 @@ static LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HBITMAP bmp = CreateCompatibleBitmap(hdc, W, H);
         HBITMAP old = (HBITMAP)SelectObject(memDC, bmp);
 
+        // Clear to transparent black
         BLENDFUNCTION bf = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
         PatBlt(memDC, 0, 0, W, H, BLACKNESS);
 
+        // Font
         HFONT font = CreateFontA(14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                  CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Consolas");
         HFONT oldFont = (HFONT)SelectObject(memDC, font);
         SetBkMode(memDC, TRANSPARENT);
 
+        // Get state
         double px = 0, py = 0, pz = 0;
         JNIEnv* env = GetEnv();
         if (env && g_gsClass) {
@@ -183,6 +202,7 @@ static LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
         RenderOverlay(memDC, W, H, px, py, pz, g_guiOpen);
 
+        // Layered window update
         POINT ptSrc = {0, 0};
         SIZE  szWnd = {W, H};
         POINT origin = {0, 0};
@@ -204,13 +224,15 @@ static LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
 }
 
-// ── Find Minecraft GLFW window ────────────────────────────────────────────────────────
+// ── Find Minecraft GLFW window ────────────────────────────────────────────────────────────────────
 static HWND FindMcWindow() {
+    // GLFW windows use class "GLFW30" on Windows
     HWND h = FindWindowA("GLFW30", nullptr);
     if (!h) h = FindWindowA(nullptr, "Minecraft 1.21.11");
     return h;
 }
 
+// ── Create/update overlay window geometry ─────────────────────────────────────────────────────
 static void UpdateOverlayGeometry() {
     if (!g_mcWindow || !g_overlay) return;
     RECT rc;
@@ -222,6 +244,7 @@ static void UpdateOverlayGeometry() {
                  SWP_NOACTIVATE);
 }
 
+// ── Create the overlay window ───────────────────────────────────────────────────────────────────────
 static bool CreateOverlay() {
     WNDCLASSEXA wc = {};
     wc.cbSize        = sizeof(wc);
@@ -253,15 +276,24 @@ static bool CreateOverlay() {
     return true;
 }
 
+// ── Toggle feature via JNI ───────────────────────────────────────────────────────────────────────────
 static void RequestToggle(const std::string& name) {
     JNIEnv* env = GetEnv();
     if (!env || !g_gsClass) return;
     SetStaticStr(env, g_gsClass, "pendingToggle", name.c_str());
 }
 
+// ── Key input handler (runs in main thread message pump) ─────────────────────────────────────────
 static void HandleKey(int vk) {
+    if (vk == VK_DELETE) {
+        // Panic — works regardless of overlay state
+        JNIEnv* env = GetEnv();
+        if (env && g_gsClass) SetStaticBool(env, g_gsClass, "panicRequested", true);
+        return;
+    }
     if (vk == VK_INSERT) {
         g_guiOpen = !g_guiOpen;
+        // When GUI open: remove WS_EX_TRANSPARENT so mouse clicks work
         LONG_PTR ex = GetWindowLongPtrA(g_overlay, GWL_EXSTYLE);
         if (g_guiOpen) ex &= ~WS_EX_TRANSPARENT;
         else           ex |=  WS_EX_TRANSPARENT;
@@ -283,7 +315,9 @@ static void HandleKey(int vk) {
     }
 }
 
+// ── Main DLL thread ─────────────────────────────────────────────────────────────────────────────────────
 static DWORD WINAPI ModThread(LPVOID) {
+    // Wait for JVM
     for (int i = 0; i < 200; i++) {
         jsize count = 0;
         JNI_GetCreatedJavaVMs(&g_jvm, 1, &count);
@@ -295,6 +329,7 @@ static DWORD WINAPI ModThread(LPVOID) {
     JNIEnv* env = GetEnv();
     if (!env) return 1;
 
+    // Wait for agent to load (GameState.active = true)
     for (int i = 0; i < 100; i++) {
         g_gsClass = env->FindClass("com/modloader/GameState");
         if (g_gsClass) {
@@ -306,6 +341,7 @@ static DWORD WINAPI ModThread(LPVOID) {
     }
     if (!g_gsClass) return 1;
 
+    // Wait for Minecraft window
     for (int i = 0; i < 60; i++) {
         g_mcWindow = FindMcWindow();
         if (g_mcWindow) break;
@@ -315,20 +351,26 @@ static DWORD WINAPI ModThread(LPVOID) {
     CreateOverlay();
     UpdateOverlayGeometry();
 
+    // Key state tracking
     bool keyState[256] = {};
 
+    // Message + render loop
     while (g_running && g_overlay) {
+        // Update overlay position to match MC window
         if (g_mcWindow) UpdateOverlayGeometry();
 
-        for (int vk : {VK_INSERT, VK_UP, VK_DOWN, VK_RETURN, VK_SPACE}) {
+        // Poll keys
+        for (int vk : {VK_DELETE, VK_INSERT, VK_UP, VK_DOWN, VK_RETURN, VK_SPACE}) {
             bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
             if (down && !keyState[vk]) HandleKey(vk);
             keyState[vk] = down;
         }
 
+        // Refresh overlay every ~50ms
         InvalidateRect(g_overlay, nullptr, FALSE);
         UpdateWindow(g_overlay);
 
+        // Process messages
         MSG msg;
         while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) { g_running = false; break; }
@@ -343,6 +385,7 @@ static DWORD WINAPI ModThread(LPVOID) {
     return 0;
 }
 
+// ── DLL entry point ───────────────────────────────────────────────────────────────────────────────────
 BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_hInst = hInst;
