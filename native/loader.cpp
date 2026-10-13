@@ -173,8 +173,8 @@ static std::string ReadTempFile(const wchar_t *name) {
     swprintf_s(p, L"%s%s", tmp, name);
     HANDLE f = CreateFileW(p, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (f == INVALID_HANDLE_VALUE) return {};
-    char buf[512] = {}; DWORD rd;
-    ReadFile(f, buf, 511, &rd, NULL);
+    char buf[8192] = {}; DWORD rd;
+    ReadFile(f, buf, sizeof(buf)-1, &rd, NULL);
     CloseHandle(f);
     return buf;
 }
@@ -204,6 +204,33 @@ static void Banner() {
     White();
 }
 
+static void DoPanic(const std::wstring &agentJar) {
+    Cls(); Banner();
+    Red();
+    printf("   [2] PANIC - removing all traces...\n\n");
+    White();
+
+    WriteTempFile(L"clickgui_cmd.txt", "0");
+    printf("   [1/4] Disable signal sent to agent...\n");
+    Sleep(2000);
+
+    DeleteFileW(agentJar.c_str());
+    printf("   [2/4] agent.jar deleted\n");
+
+    DeleteTempFile(L"clickgui_cmd.txt");
+    DeleteTempFile(L"clickgui_log.txt");
+    DeleteTempFile(L"clickgui_status.txt");
+    DeleteTempFile(L"clickgui_pause.txt");
+    printf("   [3/4] Temp files cleaned\n");
+
+    printf("   [4/4] Done\n\n");
+
+    Green();
+    printf("   All traces removed. loader.exe is the only file left.\n\n");
+    White();
+    Sleep(3000);
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────
 int main() {
     SetConsoleTitleA("System Client v8.0");
@@ -211,154 +238,125 @@ int main() {
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
     wchar_t *sl = wcsrchr(exePath, L'\\');
-    std::wstring exeDir  = sl ? std::wstring(exePath, sl + 1) : L"";
+    std::wstring exeDir   = sl ? std::wstring(exePath, sl + 1) : L"";
     std::wstring agentJar = exeDir + L"agent.jar";
 
     const std::wstring BASE_URL =
         L"https://github.com/defix112/minecraft22/releases/latest/download/";
 
-    DWORD mcPid    = 0;
-    int   step     = 0;
-    bool  injected = false;
+    bool injected = false;
 
     while (true) {
         Cls();
         Banner();
 
+        // ── Auto-find Minecraft ───────────────────────────────────────────
+        DWORD mcPid = FindMinecraft();
+
         if (!injected) {
-            if (step == 0) {
-                printf("   Minecraft : not found\n\n");
-                Green(); printf("   [1]  Find Minecraft\n"); White();
+            if (mcPid) {
+                Green(); printf("   Minecraft : PID %lu\n\n", mcPid); White();
+                Green(); printf("   [1]  Install & Inject mod\n"); White();
             } else {
-                printf("   Minecraft : PID %lu\n\n", mcPid);
-                Green(); printf("   [1]  Download + Inject\n"); White();
+                Red(); printf("   Minecraft : NOT FOUND\n\n"); White();
+                Yellow(); printf("   Start Minecraft 1.21.11 first!\n\n"); White();
+                Green(); printf("   [1]  Retry\n"); White();
             }
-            Red(); printf("   [0]  Exit\n"); White();
+            Red();    printf("   [2]  Remove all mod files\n"); White();
+            Yellow(); printf("   [0]  Exit\n"); White();
             printf("  ==========================================\n\n");
 
-            char k = WaitKey("10");
+            char k = WaitKey("120");
             if (k == '0') break;
+            if (k == '2') { DoPanic(agentJar); continue; }
 
-            // ── [1] first press: find MC ────────────────────────────────────
-if (step == 0) {
-                Cls(); Banner();
-                printf("   Searching for Minecraft...\n\n");
-                mcPid = FindMinecraft();
-                if (!mcPid) {
-                    Red();
-                    printf("   [-] Minecraft not found.\n");
-                    printf("   Start Minecraft 1.21.11 and join a world!\n\n");
-                    White();
-                    Sleep(3000);
-                    continue;
-                }
-                Green();
-                printf("   [+] Found PID: %lu\n\n", mcPid);
-                White();
-                step = 1;
-                Sleep(1200);
+            // ── [1] Install + Inject ──────────────────────────────────────
+            if (!mcPid) {
+                // re-try finding MC
                 continue;
             }
 
-            // ── [1] second press: download + inject ───────────────────────────
             Cls(); Banner();
 
             // Find Minecraft's java.exe
             std::wstring javaExe = FindMinecraftJava(mcPid);
             if (javaExe.empty()) {
-                Red(); printf("   [-] Could not find Minecraft's java.exe.\n\n"); White();
+                Red(); printf("   [-] Cannot find Minecraft's java.exe\n\n"); White();
                 Sleep(4000); continue;
             }
+            Green(); printf("   [+] java.exe: "); White();
+            // Print java path as narrow string
+            char jbuf[MAX_PATH*2]; WideCharToMultiByte(CP_ACP,0,javaExe.c_str(),-1,jbuf,sizeof(jbuf),0,0);
+            printf("%s\n\n", jbuf);
 
-            // Download agent.jar
+            // Download agent.jar if missing
             if (GetFileAttributesW(agentJar.c_str()) == INVALID_FILE_ATTRIBUTES) {
-                printf("   Downloading agent.jar...\n\n");
+                printf("   Downloading agent.jar...\n");
                 if (!Download(BASE_URL + L"agent.jar", agentJar)) {
-                    Red(); printf("   [-] Download failed (agent.jar).\n\n"); White();
+                    Red(); printf("   [-] Download failed! Check internet.\n\n"); White();
                     Sleep(4000); continue;
                 }
-                Green(); printf("   [+] agent.jar OK\n\n"); White();
+                Green(); printf("   [+] Downloaded OK\n\n"); White();
             } else {
                 Green(); printf("   [+] agent.jar present\n\n"); White();
             }
 
-            // Inject via Java agent attach
-            printf("   Attaching agent to PID %lu...\n\n", mcPid);
+            // Inject
+            printf("   Injecting into PID %lu...\n\n", mcPid);
             DeleteTempFile(L"clickgui_log.txt");
             DeleteTempFile(L"clickgui_status.txt");
 
             std::string attachLog;
             if (!AttachAgent(javaExe, mcPid, agentJar, attachLog)) {
                 Red();
-                printf("   [-] Attach FAILED!\n");
-                if (!attachLog.empty()) printf("   Output: %s\n", attachLog.c_str());
-                printf("   Make sure Minecraft is running and try again.\n\n");
+                printf("   [-] Injection FAILED!\n");
+                if (!attachLog.empty()) printf("%s\n", attachLog.c_str());
+                printf("\n   Run as Administrator and make sure you're in a world.\n\n");
                 White();
                 Sleep(6000);
                 continue;
             }
-            if (!attachLog.empty()) { Green(); printf("   %s\n", attachLog.c_str()); White(); }
+            if (!attachLog.empty()) { printf("%s\n", attachLog.c_str()); }
 
-            Green();
-            printf("   [+] Agent attached!\n");
-            White();
-
-            // Wait up to 15s for agent to write status
-            for (int i = 0; i < 30; i++) {
+            // Wait up to 10s for agent to write status
+            printf("   Waiting for agent...\n");
+            for (int i = 0; i < 20; i++) {
                 Sleep(500);
-                std::string st = ReadTempFile(L"clickgui_status.txt");
-                if (!st.empty()) break;
+                if (!ReadTempFile(L"clickgui_status.txt").empty()) break;
             }
 
             injected = true;
 
         } else {
-            // ── Injected menu ──────────────────────────────────────────────────
-            Green();
-            printf("        ** INJECTED **\n\n");
-            White();
-            printf("   Press RIGHT SHIFT in game to open GUI.\n");
-            printf("   Works in main menu and in-world.\n\n");
-
+            // ── Injected menu ─────────────────────────────────────────────
             std::string status = ReadTempFile(L"clickgui_status.txt");
+            std::string log    = ReadTempFile(L"clickgui_log.txt");
+
+            Green(); printf("        ** INJECTED **\n\n"); White();
+            printf("   RIGHT SHIFT = open GUI (works anywhere)\n\n");
+
             if (!status.empty()) {
-                printf("   Status: "); Green(); printf("%s\n\n", status.c_str()); White();
-            } else {
-                Yellow(); printf("   Status: agent loading...\n\n"); White();
+                if (status.find("ERROR") != std::string::npos) Red();
+                else Green();
+                printf("   Status: %s\n\n", status.c_str()); White();
             }
 
-            Red();    printf("   [0]  PANIC - remove mod\n"); White();
-            Yellow(); printf("   [9]  Close (mod stays active)\n"); White();
+            // Always show full log
+            if (!log.empty()) {
+                Yellow(); printf("   --- Log ---\n"); White();
+                printf("%s\n", log.c_str());
+            }
+
+            Red();    printf("   [2]  Remove all traces (PANIC)\n"); White();
+            Yellow(); printf("   [0]  Close (mod stays active)\n"); White();
             printf("  ==========================================\n\n");
 
-            char k = WaitKey("09");
-            if (k == '9') break;
+            char k = WaitKey("20");
+            if (k == '0') break;
 
-            // ── PANIC ─────────────────────────────────────────────────────────────────
-            Cls(); Banner();
-            Red();
-            printf("   PANIC - Removing all traces...\n\n");
-            White();
-
-            WriteTempFile(L"clickgui_cmd.txt", "0");
-            printf("   [1/3] Disable signal sent to agent...\n");
-            Sleep(2000);
-
-            DeleteFileW(agentJar.c_str());
-            printf("   [2/3] agent.jar deleted\n");
-
-            DeleteTempFile(L"clickgui_cmd.txt");
-            DeleteTempFile(L"clickgui_log.txt");
-            DeleteTempFile(L"clickgui_status.txt");
-            DeleteTempFile(L"clickgui_pause.txt");
-            printf("   [3/3] Temp files cleaned\n\n");
-
-            Green();
-            printf("   All traces removed. Game restored.\n");
-            printf("   loader.exe kept - run again to reinstall.\n\n");
-            White();
-            Sleep(3000);
-            break;
+            // ── [2] PANIC ─────────────────────────────────────────────────
+            DoPanic(agentJar);
+            injected = false;
         }
     }
     return 0;
