@@ -13,7 +13,7 @@ static std::wstring g_selfPath;
 static const std::wstring BASE_URL =
     L"https://github.com/defix112/minecraft22/releases/latest/download/";
 
-// ── Self-registration: .lmr -> exe, startup entry ────────────────────
+// ── Self-registration: register .lmr extension on first run ─────────────────
 static void SelfRegister() {
     HKEY hk;
     if (RegCreateKeyExW(HKEY_CLASSES_ROOT, L".lmr", 0, NULL, 0,
@@ -27,14 +27,6 @@ static void SelfRegister() {
         std::wstring cmd = L"\"" + g_selfPath + L"\"";
         RegSetValueExW(hk, NULL, 0, REG_SZ, (BYTE*)cmd.c_str(),
                        (DWORD)(cmd.size()+1)*sizeof(wchar_t));
-        RegCloseKey(hk);
-    }
-    if (RegOpenKeyExW(HKEY_CURRENT_USER,
-                      L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                      0, KEY_SET_VALUE, &hk) == ERROR_SUCCESS) {
-        std::wstring val = L"\"" + g_selfPath + L"\"";
-        RegSetValueExW(hk, L"ekran_uaqyty", 0, REG_SZ, (BYTE*)val.c_str(),
-                       (DWORD)(val.size()+1)*sizeof(wchar_t));
         RegCloseKey(hk);
     }
 }
