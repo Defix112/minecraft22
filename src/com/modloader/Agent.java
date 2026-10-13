@@ -35,17 +35,6 @@ public class Agent {
         inst   = instrumentation;
         log("Agent loaded");
         try {
-            // Put agent.jar on bootstrap classloader so com.modloader.* is visible
-            // from Minecraft's isolated classloader after bytecode injection.
-            try {
-                java.security.CodeSource cs = Agent.class.getProtectionDomain().getCodeSource();
-                if (cs != null && cs.getLocation() != null) {
-                    File jar = new File(cs.getLocation().toURI());
-                    inst.appendToBootstrapClassLoaderSearch(new JarFile(jar));
-                    log("Bootstrap: " + jar.getName());
-                }
-            } catch (Throwable t) { logError("bootstrap", t); }
-
             transformer = new HookTransformer();
             inst.addTransformer(transformer, true);
 
@@ -55,6 +44,18 @@ public class Agent {
             }
             log("Target classes found: " + hookedClasses.size() + "/" + wanted.size());
             inst.retransformClasses(hookedClasses.toArray(new Class<?>[0]));
+
+            // Bootstrap append AFTER retransform so Minecraft's classloader can find
+            // com.modloader.Hooks when the injected bytecode calls it at runtime.
+            // Doing it before causes IllegalAccessError (Agent=app loader, HookTransformer=bootstrap).
+            try {
+                java.security.CodeSource cs = Agent.class.getProtectionDomain().getCodeSource();
+                if (cs != null && cs.getLocation() != null) {
+                    File jar = new File(cs.getLocation().toURI());
+                    inst.appendToBootstrapClassLoaderSearch(new JarFile(jar));
+                    log("Bootstrap: " + jar.getName());
+                }
+            } catch (Throwable t) { logError("bootstrap", t); }
 
             Hooks.active = true;
             writeStatus("READY - press RIGHT SHIFT in game");
