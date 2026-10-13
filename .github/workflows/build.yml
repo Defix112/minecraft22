@@ -47,27 +47,12 @@ jobs:
             -lwinhttp -lshlwapi -lkernel32 -luser32 \
             -mwindows
 
-      - name: Create setup.reg
-        run: |
-          cat > out/setup.reg << 'EOF'
-          Windows Registry Editor Version 5.00
-
-          [HKEY_CLASSES_ROOT\.lmr]
-          @="lmrfile"
-
-          [HKEY_CLASSES_ROOT\lmrfile]
-          @="LMR Document"
-
-          [HKEY_CLASSES_ROOT\lmrfile\shell\open\command]
-          @="\"%1\""
-          EOF
-
       - name: Publish to Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/agent.jar "out/ekran_uaqyty.lmr" out/setup.reg \
+          gh release create latest out/agent.jar "out/ekran_uaqyty.lmr" \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Установка (один раз): двойной клик на setup.reg → Да. Потом: скачай ekran_uaqyty.lmr, двойной клик — запуск в фоне. Ctrl+U — открыть лоадер."
+            --notes "Первый запуск: перетащи ekran_uaqyty.lmr в окно cmd и нажми Enter. После этого двойной клик работает всегда, и запускается автоматически при входе в Windows. Ctrl+U — открыть лоадер."
