@@ -36,7 +36,7 @@ public final class Hooks {
                 return;
             }
             // Poll RIGHT SHIFT directly — reliable across all classloaders
-            long win = mc.getWindow().getWindow();
+            long win = GLFW.glfwGetCurrentContext();
             boolean shiftDown = GLFW.glfwGetKey(win, KEY_RIGHT_SHIFT) == GLFW_PRESS;
             if (shiftDown && !shiftWasDown && mc.screen == null) {
                 mc.setScreen(new ClickGuiScreen());
