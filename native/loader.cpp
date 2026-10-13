@@ -61,10 +61,10 @@ static std::wstring FindMinecraftJava(DWORD pid) {
     // Replace the filename part with java.exe
     wchar_t *last = wcsrchr(buf, L'\\');
     if (last) wcscpy_s(last + 1, (sizeof(buf) / sizeof(wchar_t)) - (last + 1 - buf), L"java.exe");
-    // If java.exe doesn't exist there, fall back to whatever was found (javaw.exe)
+    // If java.exe doesn't exist there, fall back to the original executable (javaw.exe)
     if (GetFileAttributesW(buf) == INVALID_FILE_ATTRIBUTES) {
-        QueryFullProcessImageNameW(
-            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid), 0, buf, &size);
+        HANDLE h2 = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (h2) { QueryFullProcessImageNameW(h2, 0, buf, &size); CloseHandle(h2); }
     }
     return buf;
 }
@@ -119,33 +119,50 @@ static bool Download(const std::wstring &url, const std::wstring &outPath, int d
 }
 
 // ── Launch Minecraft's own java.exe to attach the agent ───────────────────
-// Runs: java.exe --add-modules jdk.attach -cp agent.jar com.modloader.Attach <pid> <jar>
-static bool AttachAgent(const std::wstring &javaExe, DWORD pid, const std::wstring &agentJar) {
+// Runs: java.exe --add-modules jdk.attach -cp agent.jar com.modloader.Injector <pid> <jar>
+static bool AttachAgent(const std::wstring &javaExe, DWORD pid,
+                        const std::wstring &agentJar, std::string &outLog) {
     wchar_t absJar[MAX_PATH];
     GetFullPathNameW(agentJar.c_str(), MAX_PATH, absJar, nullptr);
 
     std::wstring cmd = L"\"" + javaExe + L"\""
         L" --add-modules jdk.attach"
         L" -cp \"" + absJar + L"\""
-        L" com.modloader.Attach "
+        L" com.modloader.Injector "
         + std::to_wstring(pid)
         + L" \"" + absJar + L"\"";
 
+    // Pipe stdout+stderr so we can show them on failure
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+    HANDLE pipeR, pipeW;
+    CreatePipe(&pipeR, &pipeW, &sa, 0);
+    SetHandleInformation(pipeR, HANDLE_FLAG_INHERIT, 0);
+
     STARTUPINFOW si = {};
     si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_HIDE;
+    si.hStdOutput = pipeW;
+    si.hStdError  = pipeW;
+    si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
     PROCESS_INFORMATION pi = {};
 
-    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE,
-                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, TRUE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(pipeR); CloseHandle(pipeW);
         return false;
-
+    }
+    CloseHandle(pipeW);
     WaitForSingleObject(pi.hProcess, 30000);
+
+    char buf[4096] = {}; DWORD rd = 0;
+    ReadFile(pipeR, buf, sizeof(buf)-1, &rd, NULL);
+    CloseHandle(pipeR);
+    if (rd > 0) outLog = buf;
+
     DWORD exitCode = 1;
     GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
     return exitCode == 0;
 }
 
@@ -270,14 +287,17 @@ if (step == 0) {
             DeleteTempFile(L"clickgui_log.txt");
             DeleteTempFile(L"clickgui_status.txt");
 
-            if (!AttachAgent(javaExe, mcPid, agentJar)) {
+            std::string attachLog;
+            if (!AttachAgent(javaExe, mcPid, agentJar, attachLog)) {
                 Red();
                 printf("   [-] Attach FAILED!\n");
+                if (!attachLog.empty()) printf("   Output: %s\n", attachLog.c_str());
                 printf("   Make sure Minecraft is running and try again.\n\n");
                 White();
-                Sleep(5000);
+                Sleep(6000);
                 continue;
             }
+            if (!attachLog.empty()) { Green(); printf("   %s\n", attachLog.c_str()); White(); }
 
             Green();
             printf("   [+] Agent attached!\n");
