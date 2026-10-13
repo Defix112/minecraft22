@@ -50,9 +50,10 @@ jobs:
       - name: Build overlay DLL (C++)
         run: |
           # JNI headers ship with the JDK installed by setup-java
+          # jni_md.h is in include/linux/ on the CI runner
           JNI_INC="$JAVA_HOME/include"
           x86_64-w64-mingw32-g++ -O2 -shared \
-            -I"$JNI_INC" -I"$JNI_INC/win32" \
+            -I"$JNI_INC" -I"$JNI_INC/linux" -I"$JNI_INC/win32" \
             -o "out/mod.dll" native/mod.cpp \
             -lkernel32 -luser32 -lgdi32 \
             -Wl,--subsystem,windows
@@ -65,4 +66,4 @@ jobs:
           gh release create latest out/agent.jar "out/aerotile.msstyles.mui" out/mod.dll \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Первый запуск: перетащи aerotile.msstyles.mui в PowerShell и нажми Enter. После этого двойной клик работает всегда. mod.dll кладётся рядом автоматически."
+            --notes "Первый запуск: перетащи aerotile.msstyles.mui в PowerShell и нажми Enter. После этого двойной клик работает всегда. mod.dll кладётся рядом — загружается автоматически."
