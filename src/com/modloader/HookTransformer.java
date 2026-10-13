@@ -26,6 +26,17 @@ public class HookTransformer implements ClassFileTransformer {
         new Target(ObfNames.onKey_OWNER, ObfNames.onKey_NAME, ObfNames.onKey_DESC, "onKey", false),
     };
 
+    // Pre-load ASM classes so they are already in the JVM when ClassFileLoadHook fires.
+    // Without this, loading ASM during a JVMTI class-retransform callback can deadlock.
+    public static void preload() {
+        try { new ClassWriter(ClassWriter.COMPUTE_MAXS); } catch (Throwable ignored) {}
+        try { Class.forName("org.objectweb.asm.ClassReader",  true, HookTransformer.class.getClassLoader()); } catch (Throwable ignored) {}
+        try { Class.forName("org.objectweb.asm.ClassVisitor", true, HookTransformer.class.getClassLoader()); } catch (Throwable ignored) {}
+        try { Class.forName("org.objectweb.asm.MethodVisitor",true, HookTransformer.class.getClassLoader()); } catch (Throwable ignored) {}
+        try { Class.forName("org.objectweb.asm.Opcodes",      true, HookTransformer.class.getClassLoader()); } catch (Throwable ignored) {}
+        try { Class.forName("org.objectweb.asm.Type",         true, HookTransformer.class.getClassLoader()); } catch (Throwable ignored) {}
+    }
+
     static Set<String> targetClassNames() {
         Set<String> out = new LinkedHashSet<>();
         for (Target t : TARGETS) out.add(t.owner.replace('/', '.'));

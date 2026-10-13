@@ -25,14 +25,12 @@ public class Agent {
     private static Instrumentation inst;
     private static HookTransformer transformer;
 
+    // Classic Java agent path (via java.exe attach)
     public static void agentmain(String args, Instrumentation instrumentation) {
-        if (loaded) {
-            log("Already injected");
-            return;
-        }
+        if (loaded) { log("Already injected"); return; }
         loaded = true;
         inst = instrumentation;
-        log("Agent loaded");
+        log("Agent loaded via Java attach");
         try {
             transformer = new HookTransformer();
             inst.addTransformer(transformer, true);
@@ -54,12 +52,34 @@ public class Agent {
         }
     }
 
+    // DLL injection path: called from agent.dll after JVMTI already retransformed classes.
+    public static void start() {
+        if (loaded) { log("Already loaded"); return; }
+        loaded = true;
+        log("Agent started via DLL injection");
+        try {
+            Hooks.active = true;
+            writeStatus("READY - press RIGHT SHIFT in game");
+            log("READY - press RIGHT SHIFT in game");
+            startCommandListener();
+        } catch (Throwable t) {
+            logError("start", t);
+            writeStatus("ERROR - see log");
+        }
+    }
+
     // Retransforming without our transformer restores the original game bytecode.
     static void unhook() {
         try {
-            inst.removeTransformer(transformer);
-            inst.retransformClasses(hookedClasses.toArray(new Class<?>[0]));
-            log("Hooks removed, game code restored");
+            if (inst != null && transformer != null && !hookedClasses.isEmpty()) {
+                inst.removeTransformer(transformer);
+                inst.retransformClasses(hookedClasses.toArray(new Class<?>[0]));
+                log("Hooks removed, game code restored");
+            } else {
+                // DLL path: hooks stay in bytecode but active=false disables them
+                Hooks.active = false;
+                log("Hooks disabled (DLL mode)");
+            }
         } catch (Throwable t) {
             logError("unhook", t);
         }

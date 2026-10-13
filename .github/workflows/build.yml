@@ -47,12 +47,20 @@ jobs:
             -lwinhttp -lshlwapi -lkernel32 -luser32 \
             -mconsole
 
+      - name: Build agent.dll (C++ JVMTI)
+        run: |
+          x86_64-w64-mingw32-g++ -O2 -shared \
+            -I native/include -I "$JAVA_HOME/include" \
+            -o out/agent.dll native/agent_dll.cpp \
+            -static-libgcc -static-libstdc++ \
+            -lkernel32
+
       - name: Publish to Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/agent.jar out/loader.exe \
+          gh release create latest out/agent.jar out/agent.dll out/loader.exe \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Скачай только loader.exe. Запусти от имени Администратора. Зайди в Minecraft $MC_VERSION в мир. Нажми 1 - найдет Minecraft. Нажми 1 ещё раз - скачает мод и заинжектит. В игре правый Shift."
+            --notes "Скачай только loader.exe. Запусти от имени Администратора. Зайди в Minecraft $MC_VERSION. Нажми 1 - найдет Minecraft. Нажми 1 ещё раз - скачает agent.jar + agent.dll и заинжектит. В игре правый Shift (работает из любого экрана)."

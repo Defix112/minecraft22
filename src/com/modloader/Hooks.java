@@ -28,7 +28,7 @@ public final class Hooks {
             }
             if (openRequested) {
                 openRequested = false;
-                if (mc.screen == null) mc.setScreen(new ClickGuiScreen());
+                mc.setScreen(new ClickGuiScreen());
             }
             ModuleManager.tick(mc);
         } catch (Throwable t) {
@@ -49,7 +49,7 @@ public final class Hooks {
     public static void onKey(long window, int action, KeyEvent event) {
         if (!active) return;
         try {
-            if (action == GLFW_PRESS && event.key() == KEY_RIGHT_SHIFT && Minecraft.getInstance().screen == null) {
+            if (action == GLFW_PRESS && event.key() == KEY_RIGHT_SHIFT) {
                 openRequested = true;
             }
         } catch (Throwable t) {
