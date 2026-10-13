@@ -48,7 +48,7 @@ remap genobf "$MC/client.txt" "$B/gen/com/modloader/ObfNames.java" "${HOOKS[@]}"
 
 echo "== Compiling mod against Minecraft $MC_VERSION"
 mapfile -t SOURCES < <(find "$ROOT/src" -name '*.java')
-javac --release 21 -encoding UTF-8 -Xlint:-options -d "$B/named" \
+javac --release 21 --add-modules jdk.attach -encoding UTF-8 -Xlint:-options -d "$B/named" \
   -cp "$MC/client-named.jar:$MC/libs/*:$ROOT/lib/asm-9.7.1.jar" \
   "${SOURCES[@]}" "$B/gen/com/modloader/ObfNames.java"
 

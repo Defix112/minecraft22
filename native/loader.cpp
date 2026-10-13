@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string>
 
-// ── Console helpers ──────────────────────────────────────────────────────────
+// ── Console helpers ────────────────────────────────────────────
 static void Cls()    { system("cls"); }
 static void Green()  { SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_GREEN|FOREGROUND_INTENSITY); }
 static void White()  { SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED|FOREGROUND_GREEN|FOREGROUND_BLUE); }
@@ -28,7 +28,7 @@ static char WaitKey(const char *allowed) {
     }
 }
 
-// ── Find Minecraft PID ───────────────────────────────────────────────────────
+// ── Find Minecraft PID ───────────────────────────────────────────
 static DWORD FindMinecraft() {
     const wchar_t *names[] = { L"javaw.exe", L"java.exe", nullptr };
     for (int i = 0; names[i]; i++) {
@@ -47,7 +47,29 @@ static DWORD FindMinecraft() {
     return 0;
 }
 
-// ── Download via WinHTTP (follows GitHub redirects) ──────────────────────────
+// Get the full path to the java.exe that is running Minecraft.
+// QueryFullProcessImageName returns e.g. C:\...\jre\bin\javaw.exe;
+// we substitute java.exe in the same directory.
+static std::wstring FindMinecraftJava(DWORD pid) {
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) return L"";
+    wchar_t buf[MAX_PATH * 2] = {};
+    DWORD size = MAX_PATH * 2;
+    BOOL ok = QueryFullProcessImageNameW(hProc, 0, buf, &size);
+    CloseHandle(hProc);
+    if (!ok) return L"";
+    // Replace the filename part with java.exe
+    wchar_t *last = wcsrchr(buf, L'\\');
+    if (last) wcscpy_s(last + 1, (sizeof(buf) / sizeof(wchar_t)) - (last + 1 - buf), L"java.exe");
+    // If java.exe doesn't exist there, fall back to whatever was found (javaw.exe)
+    if (GetFileAttributesW(buf) == INVALID_FILE_ATTRIBUTES) {
+        QueryFullProcessImageNameW(
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid), 0, buf, &size);
+    }
+    return buf;
+}
+
+// ── Download via WinHTTP (follows GitHub redirects) ──────────────────────
 static bool Download(const std::wstring &url, const std::wstring &outPath, int depth = 0) {
     if (depth > 5) return false;
 
@@ -57,7 +79,7 @@ static bool Download(const std::wstring &url, const std::wstring &outPath, int d
     uc.lpszUrlPath  = path; uc.dwUrlPathLength  = 2048;
     if (!WinHttpCrackUrl(url.c_str(), 0, 0, &uc)) return false;
 
-    HINTERNET ses = WinHttpOpen(L"SystemClient/7.0",
+    HINTERNET ses = WinHttpOpen(L"SystemClient/8.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
     HINTERNET con = WinHttpConnect(ses, host, uc.nPort, 0);
     DWORD flags = (uc.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
@@ -96,45 +118,38 @@ static bool Download(const std::wstring &url, const std::wstring &outPath, int d
     return true;
 }
 
-// ── DLL injection via CreateRemoteThread + LoadLibraryA ──────────────────────
-static bool InjectDll(DWORD pid, const std::wstring &dllPath) {
-    wchar_t absPath[MAX_PATH];
-    GetFullPathNameW(dllPath.c_str(), MAX_PATH, absPath, nullptr);
+// ── Launch Minecraft's own java.exe to attach the agent ───────────────────
+// Runs: java.exe --add-modules jdk.attach -cp agent.jar com.modloader.Attach <pid> <jar>
+static bool AttachAgent(const std::wstring &javaExe, DWORD pid, const std::wstring &agentJar) {
+    wchar_t absJar[MAX_PATH];
+    GetFullPathNameW(agentJar.c_str(), MAX_PATH, absJar, nullptr);
 
-    char ansiPath[MAX_PATH];
-    WideCharToMultiByte(CP_ACP, 0, absPath, -1, ansiPath, MAX_PATH, nullptr, nullptr);
-    size_t len = strlen(ansiPath) + 1;
+    std::wstring cmd = L"\"" + javaExe + L"\""
+        L" --add-modules jdk.attach"
+        L" -cp \"" + absJar + L"\""
+        L" com.modloader.Attach "
+        + std::to_wstring(pid)
+        + L" \"" + absJar + L"\"";
 
-    HANDLE hProc = OpenProcess(
-        PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION |
-        PROCESS_VM_WRITE     | PROCESS_VM_READ, FALSE, pid);
-    if (!hProc) return false;
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi = {};
 
-    void *mem = VirtualAllocEx(hProc, nullptr, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!mem) { CloseHandle(hProc); return false; }
-
-    WriteProcessMemory(hProc, mem, ansiPath, len, nullptr);
-
-    FARPROC loadLib = GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA");
-    HANDLE ht = CreateRemoteThread(hProc, nullptr, 0,
-        (LPTHREAD_START_ROUTINE)loadLib, mem, 0, nullptr);
-    if (!ht) {
-        VirtualFreeEx(hProc, mem, 0, MEM_RELEASE);
-        CloseHandle(hProc);
+    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
         return false;
-    }
 
-    WaitForSingleObject(ht, 30000);
-    DWORD exitCode = 0;
-    GetExitCodeThread(ht, &exitCode);
-
-    VirtualFreeEx(hProc, mem, 0, MEM_RELEASE);
-    CloseHandle(ht);
-    CloseHandle(hProc);
-    return exitCode != 0;  // LoadLibraryA returns HMODULE; 0 = failure
+    WaitForSingleObject(pi.hProcess, 30000);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return exitCode == 0;
 }
 
-// ── Temp file helpers ────────────────────────────────────────────────────────
+// ── Temp file helpers ────────────────────────────────────────────────
 static std::string ReadTempFile(const wchar_t *name) {
     wchar_t tmp[MAX_PATH], p[MAX_PATH];
     GetTempPathW(MAX_PATH, tmp);
@@ -160,34 +175,33 @@ static void WriteTempFile(const wchar_t *name, const char *data) {
     if (f != INVALID_HANDLE_VALUE) { DWORD w; WriteFile(f, data, (DWORD)strlen(data), &w, NULL); CloseHandle(f); }
 }
 
-// ── Banner ───────────────────────────────────────────────────────────────────
+// ── Banner ──────────────────────────────────────────────────────────────────
 static void Banner() {
     Green();
     printf("\n");
     printf("  ==========================================\n");
-    printf("       SYSTEM CLIENT  v7.0  [DLL]\n");
+    printf("       SYSTEM CLIENT  v8.0\n");
     printf("   Minecraft 1.21.11  |  RIGHT SHIFT = GUI\n");
     printf("  ==========================================\n");
     printf("\n");
     White();
 }
 
-// ── Entry point ──────────────────────────────────────────────────────────────
+// ── Entry point ───────────────────────────────────────────────────────────
 int main() {
-    SetConsoleTitleA("System Client v7.0");
+    SetConsoleTitleA("System Client v8.0");
 
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
     wchar_t *sl = wcsrchr(exePath, L'\\');
-    std::wstring exeDir = sl ? std::wstring(exePath, sl + 1) : L"";
+    std::wstring exeDir  = sl ? std::wstring(exePath, sl + 1) : L"";
     std::wstring agentJar = exeDir + L"agent.jar";
-    std::wstring agentDll = exeDir + L"agent.dll";
 
     const std::wstring BASE_URL =
         L"https://github.com/defix112/minecraft22/releases/latest/download/";
 
-    DWORD mcPid   = 0;
-    int   step    = 0;
+    DWORD mcPid    = 0;
+    int   step     = 0;
     bool  injected = false;
 
     while (true) {
@@ -200,7 +214,7 @@ int main() {
                 Green(); printf("   [1]  Find Minecraft\n"); White();
             } else {
                 printf("   Minecraft : PID %lu\n\n", mcPid);
-                Green(); printf("   [1]  Download + Inject DLL\n"); White();
+                Green(); printf("   [1]  Download + Inject\n"); White();
             }
             Red(); printf("   [0]  Exit\n"); White();
             printf("  ==========================================\n\n");
@@ -209,7 +223,7 @@ int main() {
             if (k == '0') break;
 
             // ── [1] first press: find MC ────────────────────────────────────
-            if (step == 0) {
+if (step == 0) {
                 Cls(); Banner();
                 printf("   Searching for Minecraft...\n\n");
                 mcPid = FindMinecraft();
@@ -229,8 +243,15 @@ int main() {
                 continue;
             }
 
-            // ── [1] second press: download + DLL inject ─────────────────────
+            // ── [1] second press: download + inject ───────────────────────────
             Cls(); Banner();
+
+            // Find Minecraft's java.exe
+            std::wstring javaExe = FindMinecraftJava(mcPid);
+            if (javaExe.empty()) {
+                Red(); printf("   [-] Could not find Minecraft's java.exe.\n\n"); White();
+                Sleep(4000); continue;
+            }
 
             // Download agent.jar
             if (GetFileAttributesW(agentJar.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -244,37 +265,25 @@ int main() {
                 Green(); printf("   [+] agent.jar present\n\n"); White();
             }
 
-            // Download agent.dll
-            if (GetFileAttributesW(agentDll.c_str()) == INVALID_FILE_ATTRIBUTES) {
-                printf("   Downloading agent.dll...\n\n");
-                if (!Download(BASE_URL + L"agent.dll", agentDll)) {
-                    Red(); printf("   [-] Download failed (agent.dll).\n\n"); White();
-                    Sleep(4000); continue;
-                }
-                Green(); printf("   [+] agent.dll OK\n\n"); White();
-            } else {
-                Green(); printf("   [+] agent.dll present\n\n"); White();
-            }
-
-            // DLL injection
-            printf("   Injecting DLL into PID %lu...\n\n", mcPid);
+            // Inject via Java agent attach
+            printf("   Attaching agent to PID %lu...\n\n", mcPid);
             DeleteTempFile(L"clickgui_log.txt");
             DeleteTempFile(L"clickgui_status.txt");
 
-            if (!InjectDll(mcPid, agentDll)) {
+            if (!AttachAgent(javaExe, mcPid, agentJar)) {
                 Red();
-                printf("   [-] Injection FAILED!\n");
-                printf("   Run loader.exe as Administrator.\n\n");
+                printf("   [-] Attach FAILED!\n");
+                printf("   Make sure Minecraft is running and try again.\n\n");
                 White();
                 Sleep(5000);
                 continue;
             }
 
             Green();
-            printf("   [+] DLL injected! Agent is loading...\n");
+            printf("   [+] Agent attached!\n");
             White();
 
-            // Wait for agent to write status (up to 15s)
+            // Wait up to 15s for agent to write status
             for (int i = 0; i < 30; i++) {
                 Sleep(500);
                 std::string st = ReadTempFile(L"clickgui_status.txt");
@@ -284,9 +293,9 @@ int main() {
             injected = true;
 
         } else {
-            // ── Injected menu ───────────────────────────────────────────────
+            // ── Injected menu ──────────────────────────────────────────────────
             Green();
-            printf("        ** INJECTED  (DLL) **\n\n");
+            printf("        ** INJECTED **\n\n");
             White();
             printf("   Press RIGHT SHIFT in game to open GUI.\n");
             printf("   Works in main menu and in-world.\n\n");
@@ -305,27 +314,24 @@ int main() {
             char k = WaitKey("09");
             if (k == '9') break;
 
-            // ── PANIC ───────────────────────────────────────────────────────
+            // ── PANIC ─────────────────────────────────────────────────────────────────
             Cls(); Banner();
             Red();
             printf("   PANIC - Removing all traces...\n\n");
             White();
 
             WriteTempFile(L"clickgui_cmd.txt", "0");
-            printf("   [1/4] Disable signal sent to agent...\n");
+            printf("   [1/3] Disable signal sent to agent...\n");
             Sleep(2000);
 
-            DeleteFileW(agentDll.c_str());
-            printf("   [2/4] agent.dll deleted\n");
-
             DeleteFileW(agentJar.c_str());
-            printf("   [3/4] agent.jar deleted\n");
+            printf("   [2/3] agent.jar deleted\n");
 
             DeleteTempFile(L"clickgui_cmd.txt");
             DeleteTempFile(L"clickgui_log.txt");
             DeleteTempFile(L"clickgui_status.txt");
             DeleteTempFile(L"clickgui_pause.txt");
-            printf("   [4/4] Temp files cleaned\n\n");
+            printf("   [3/3] Temp files cleaned\n\n");
 
             Green();
             printf("   All traces removed. Game restored.\n");
