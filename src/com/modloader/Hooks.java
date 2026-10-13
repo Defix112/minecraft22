@@ -3,57 +3,73 @@ package com.modloader;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.input.KeyEvent;
+import org.lwjgl.glfw.GLFW;
 
 // Called from bytecode injected into Minecraft. Each method's parameters must match the hooked game method exactly (checked by build.sh).
 public final class Hooks {
 
-    private static final int KEY_RIGHT_SHIFT = 344;
-    private static final int GLFW_PRESS = 1;
+    private static final int KEY_RIGHT_SHIFT = GLFW.GLFW_KEY_RIGHT_SHIFT;
+    private static final int GLFW_PRESS      = GLFW.GLFW_PRESS;
+
+    // System property is visible across all classloaders — avoids split-identity bug
+    private static final String PROP = "sc.active";
 
     public static volatile boolean active;
     static volatile boolean panicRequested;
-    private static volatile boolean openRequested;
+
+    // Edge-detect RIGHT SHIFT via GLFW poll in onTick — no onKey hook needed
+    private static boolean shiftWasDown;
 
     private Hooks() {}
 
+    private static boolean isActive() {
+        return active || "1".equals(System.getProperty(PROP));
+    }
+
     public static void onTick() {
-        if (!active) return;
+        if (!isActive()) return;
         try {
             Minecraft mc = Minecraft.getInstance();
-            if (panicRequested) {
+            if (panicRequested || GameState.panicRequested) {
                 panicRequested = false;
+                GameState.panicRequested = false;
                 Panic.run();
                 return;
             }
-            if (openRequested) {
-                openRequested = false;
-                if (mc.screen == null) mc.setScreen(new ClickGuiScreen());
+            // Poll RIGHT SHIFT directly — reliable across all classloaders
+            long win = GLFW.glfwGetCurrentContext();
+            boolean shiftDown = GLFW.glfwGetKey(win, KEY_RIGHT_SHIFT) == GLFW_PRESS;
+            if (shiftDown && !shiftWasDown && mc.screen == null) {
+                mc.setScreen(new ClickGuiScreen());
             }
+            shiftWasDown = shiftDown;
             ModuleManager.tick(mc);
+            // Update state for C++ overlay
+            net.minecraft.world.entity.player.Player p = mc.player;
+            if (p != null) {
+                GameState.playerX = p.getX();
+                GameState.playerY = p.getY();
+                GameState.playerZ = p.getZ();
+            }
+            GameState.moduleStates = ModuleManager.moduleStates();
+            GameState.active = true;
+            // Handle toggle request from C++ overlay
+            String tog = GameState.pendingToggle;
+            if (!tog.isEmpty()) {
+                GameState.pendingToggle = "";
+                ModuleManager.toggle(tog);
+            }
         } catch (Throwable t) {
             Agent.logError("onTick", t);
         }
     }
 
     public static void onHud(GuiGraphics graphics, DeltaTracker deltaTracker) {
-        if (!active) return;
+        if (!isActive()) return;
         try {
             Hud.render(graphics);
         } catch (Throwable t) {
             Agent.logError("onHud", t);
-        }
-    }
-
-    // The screen is opened on the next tick so this key press is not also delivered to the new screen.
-    public static void onKey(long window, int action, KeyEvent event) {
-        if (!active) return;
-        try {
-            if (action == GLFW_PRESS && event.key() == KEY_RIGHT_SHIFT && Minecraft.getInstance().screen == null) {
-                openRequested = true;
-            }
-        } catch (Throwable t) {
-            Agent.logError("onKey", t);
         }
     }
 }

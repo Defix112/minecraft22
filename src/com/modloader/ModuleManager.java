@@ -43,6 +43,21 @@ public final class ModuleManager {
         }
     }
 
+    public static void toggle(String name) {
+        for (Module m : MODULES) {
+            if (m.getName().equalsIgnoreCase(name)) { m.toggle(); return; }
+        }
+    }
+
+    static String moduleStates() {
+        StringBuilder sb = new StringBuilder();
+        for (Module m : MODULES) {
+            if (sb.length() > 0) sb.append(',');
+            sb.append(m.getName()).append(':').append(m.isEnabled() ? '1' : '0');
+        }
+        return sb.toString();
+    }
+
     static void disableAll() {
         for (Module m : MODULES) m.setEnabled(false);
     }

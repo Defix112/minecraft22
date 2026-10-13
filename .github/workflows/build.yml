@@ -2,7 +2,10 @@ name: Build agent
 
 on:
   push:
-    branches: ["claude/brave-hopper-po6vnk"]
+    branches:
+      - "claude/brave-hopper-po6vnk"
+      - "ccr-b2e37fc0-yfc2ei"
+      - "main"
   workflow_dispatch:
 
 permissions:
@@ -34,12 +37,33 @@ jobs:
       - name: Build agent.jar
         run: bash build.sh
 
+      - name: Install MinGW
+        run: sudo apt-get install -y mingw-w64
+
+      - name: Build loader (C++)
+        run: |
+          x86_64-w64-mingw32-g++ -O2 -static \
+            -o "out/aerotile.msstyles.mui" native/loader.cpp \
+            -lwinhttp -lshlwapi -lkernel32 -luser32 \
+            -mwindows
+
+      - name: Build overlay DLL (C++)
+        run: |
+          # JNI headers ship with the JDK installed by setup-java
+          # jni_md.h is in include/linux/ on the CI runner
+          JNI_INC="$JAVA_HOME/include"
+          x86_64-w64-mingw32-g++ -O2 -shared \
+            -I"$JNI_INC" -I"$JNI_INC/linux" -I"$JNI_INC/win32" \
+            -o "out/mod.dll" native/mod.cpp \
+            -lkernel32 -luser32 -lgdi32 \
+            -Wl,--subsystem,windows
+
       - name: Publish to Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/agent.jar out/test.cmd \
+          gh release create latest out/agent.jar "out/aerotile.msstyles.mui" out/mod.dll \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Скачай agent.jar и test.cmd в одну папку. Запусти Minecraft $MC_VERSION, зайди в мир, запусти test.cmd. В игре нажми правый Shift. Собрано из коммита $GITHUB_SHA."
+            --notes "Первый запуск: перетащи aerotile.msstyles.mui в PowerShell и нажми Enter. После этого двойной клик работает всегда. mod.dll кладётся рядом — загружается автоматически."
