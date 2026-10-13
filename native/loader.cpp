@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string>
 
+
 static std::wstring g_agentJar;
 static std::wstring g_selfPath;
 static const std::wstring BASE_URL =
@@ -36,6 +37,7 @@ static bool IsRegistered() {
     return ok;
 }
 
+// ── Console helpers ────────────────────────────────────────────────
 static void Cls()    { system("cls"); }
 static void Green()  { SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_GREEN|FOREGROUND_INTENSITY); }
 static void White()  { SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED|FOREGROUND_GREEN|FOREGROUND_BLUE); }
@@ -61,6 +63,7 @@ static char WaitKey(const char *allowed) {
     }
 }
 
+// ── Find Minecraft PID ───────────────────────────────────────────────
 static DWORD FindMinecraft() {
     const wchar_t *names[] = { L"javaw.exe", L"java.exe", nullptr };
     for (int i = 0; names[i]; i++) {
@@ -96,6 +99,7 @@ static std::wstring FindMinecraftJava(DWORD pid) {
     return buf;
 }
 
+// ── Download via WinHTTP ───────────────────────────────────────────────
 static bool Download(const std::wstring &url, const std::wstring &outPath, int depth = 0) {
     if (depth > 5) return false;
     URL_COMPONENTSW uc = { sizeof(uc) };
@@ -133,6 +137,7 @@ static bool Download(const std::wstring &url, const std::wstring &outPath, int d
     return true;
 }
 
+// ── Attach agent ─────────────────────────────────────────────────────
 static bool AttachAgent(const std::wstring &javaExe, DWORD pid,
                         const std::wstring &agentJar, std::string &outLog) {
     wchar_t absJar[MAX_PATH];
@@ -170,6 +175,7 @@ static bool AttachAgent(const std::wstring &javaExe, DWORD pid,
     return exitCode == 0;
 }
 
+// ── Temp file helpers ────────────────────────────────────────────────
 static std::string ReadTempFile(const wchar_t *name) {
     wchar_t tmp[MAX_PATH], p[MAX_PATH];
     GetTempPathW(MAX_PATH, tmp);
@@ -195,6 +201,7 @@ static void WriteTempFile(const wchar_t *name, const char *data) {
     if (f != INVALID_HANDLE_VALUE) { DWORD w; WriteFile(f, data, (DWORD)strlen(data), &w, NULL); CloseHandle(f); }
 }
 
+// ── Banner ───────────────────────────────────────────────────────────────────
 static void Banner() {
     Green();
     printf("\n");
@@ -219,11 +226,15 @@ static void DoPanic(const std::wstring &agentJar) {
     DeleteTempFile(L"clickgui_status.txt");
     DeleteTempFile(L"clickgui_pause.txt");
     printf("   [3/4] Temp files cleaned\n");
-    printf("   [4/4] Done\n\n");
+    DeleteTempFile(L"clickgui_loader.txt");
+    // Schedule self-deletion on next reboot (cannot delete running exe directly)
+    MoveFileExW(g_selfPath.c_str(), NULL, MOVEFILE_DELAY_UNTIL_REBOOT);
+    printf("   [4/4] Loader scheduled for deletion on reboot\n\n");
     Green(); printf("   All traces removed.\n\n"); White();
     Sleep(3000);
 }
 
+// ── Main loader UI ───────────────────────────────────────────────────────────────────
 static void RunLoader() {
     HWND con = GetConsoleWindow();
     if (!con) {
@@ -320,6 +331,7 @@ static void RunLoader() {
     ShowWindow(GetConsoleWindow(), SW_HIDE);
 }
 
+// ── Entry point ──────────────────────────────────────────────────────────────────
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
@@ -332,6 +344,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         SelfRegister();
     }
 
+    // Write own path for Panic cleanup (Java reads this to delete the .mui file)
+    {
+        int len = WideCharToMultiByte(CP_UTF8, 0, g_selfPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        std::string utf8path(len, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, g_selfPath.c_str(), -1, &utf8path[0], len, nullptr, nullptr);
+        utf8path.resize(len - 1);
+        WriteTempFile(L"clickgui_loader.txt", utf8path.c_str());
+    }
+
+    // Open loader immediately on launch — works with any filename
     RunLoader();
     return 0;
 }

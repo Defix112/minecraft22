@@ -13,7 +13,7 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
-// Inserts a call to the same-named static method in Hooks, passing the hooked method's arguments.
+// Inserts a call to the same-named static method in Hooks, passing the hooked game method's arguments.
 public class HookTransformer implements ClassFileTransformer {
 
     private static final String HOOKS = "com/modloader/Hooks";
@@ -23,7 +23,6 @@ public class HookTransformer implements ClassFileTransformer {
     static final Target[] TARGETS = {
         new Target(ObfNames.onTick_OWNER, ObfNames.onTick_NAME, ObfNames.onTick_DESC, "onTick", false),
         new Target(ObfNames.onHud_OWNER,  ObfNames.onHud_NAME,  ObfNames.onHud_DESC,  "onHud",  true),
-        new Target(ObfNames.onKey_OWNER,  ObfNames.onKey_NAME,  ObfNames.onKey_DESC,  "onKey",  false),
     };
 
     // Pre-load every class that transform() will touch so that ClassFileLoadHook

@@ -13,7 +13,6 @@ TOOLCP="$ROOT/lib/asm-9.7.1.jar:$ROOT/lib/asm-commons-9.7.1.jar:$ROOT/lib/asm-tr
 HOOKS=(
   "onTick=net/minecraft/client/Minecraft.tick()V"
   "onHud=net/minecraft/client/gui/Gui.render(Lnet/minecraft/client/gui/GuiGraphics;Lnet/minecraft/client/DeltaTracker;)V"
-  "onKey=net/minecraft/client/KeyboardHandler.keyPress(JILnet/minecraft/client/input/KeyEvent;)V"
 )
 
 rm -rf "$B" "$OUT"
