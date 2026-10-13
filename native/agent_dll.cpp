@@ -3,59 +3,58 @@
 #include <jni.h>
 #include <jvmti.h>
 #include <string>
+#include <map>
 #include <vector>
 
 typedef jint (JNICALL *GetCreatedJVMs_t)(JavaVM **, jsize, jsize *);
 
-static jvmtiEnv  *s_jvmti       = nullptr;
-static jobject    s_transformer  = nullptr;
-static jmethodID  s_transformMid = nullptr;
+static jvmtiEnv *s_jvmti = nullptr;
 
-// ── JVMTI ClassFileLoadHook ──────────────────────────────────────────────────
+// Phase control: 0=disabled, 1=capture original bytes, 2=return transformed bytes.
+static volatile int g_phase = 0;
+static std::map<std::string, std::vector<unsigned char>> g_captured;
+static std::map<std::string, std::vector<unsigned char>> g_transformed;
+
+// ClassFileLoadHook: pure C, no Java calls in either phase.
 void JNICALL ClassFileLoadHook(
-    jvmtiEnv *jvmti, JNIEnv *env,
-    jclass classBeingRedefined, jobject loader,
-    const char *name, jobject protectionDomain,
+    jvmtiEnv *jvmti, JNIEnv * /*env*/,
+    jclass /*classBeingRedefined*/, jobject /*loader*/,
+    const char *name, jobject /*protectionDomain*/,
     jint classDataLen, const unsigned char *classData,
     jint *newClassDataLen, unsigned char **newClassData)
 {
-    if (!s_transformer || !s_transformMid || !name) return;
+    if (!name) return;
 
-    jbyteArray inBytes = env->NewByteArray(classDataLen);
-    env->SetByteArrayRegion(inBytes, 0, classDataLen, (const jbyte *)classData);
-    jstring nameStr = env->NewStringUTF(name);
-
-    jbyteArray result = (jbyteArray)env->CallObjectMethod(
-        s_transformer, s_transformMid,
-        loader, nameStr, classBeingRedefined, protectionDomain, inBytes);
-
-    if (env->ExceptionCheck()) {
-        env->ExceptionClear();
-    } else if (result) {
-        jint len = env->GetArrayLength(result);
-        unsigned char *buf = nullptr;
-        jvmti->Allocate(len, &buf);
-        env->GetByteArrayRegion(result, 0, len, (jbyte *)buf);
-        *newClassData    = buf;
-        *newClassDataLen = len;
-        env->DeleteLocalRef(result);
+    if (g_phase == 1) {
+        // Just store original bytes — no Java calls, no class loading.
+        g_captured[name].assign(classData, classData + classDataLen);
+        return;
     }
 
-    env->DeleteLocalRef(inBytes);
-    env->DeleteLocalRef(nameStr);
+    if (g_phase == 2) {
+        // Return pre-transformed bytes — no Java calls.
+        auto it = g_transformed.find(name);
+        if (it != g_transformed.end() && !it->second.empty()) {
+            unsigned char *buf = nullptr;
+            if (jvmti->Allocate((jlong)it->second.size(), &buf) == JVMTI_ERROR_NONE && buf) {
+                memcpy(buf, it->second.data(), it->second.size());
+                *newClassData    = buf;
+                *newClassDataLen = (jint)it->second.size();
+            }
+        }
+    }
 }
 
-// ── Main agent thread ────────────────────────────────────────────────────────
 static DWORD WINAPI AgentThread(LPVOID hMod)
 {
-    // 1. Build path to agent.jar (same directory as this DLL)
+    // Build path to agent.jar in the same directory as this DLL.
     char selfPath[MAX_PATH];
     GetModuleFileNameA((HMODULE)hMod, selfPath, MAX_PATH);
     char *sl = strrchr(selfPath, '\\');
     std::string dir = sl ? std::string(selfPath, sl + 1) : "";
     std::string jarPath = dir + "agent.jar";
 
-    // 2. Wait for jvm.dll to appear in this process
+    // Wait for jvm.dll.
     HMODULE jvmDll = nullptr;
     for (int i = 0; i < 150 && !jvmDll; i++) {
         jvmDll = GetModuleHandleA("jvm.dll");
@@ -66,7 +65,7 @@ static DWORD WINAPI AgentThread(LPVOID hMod)
     auto getVMs = (GetCreatedJVMs_t)GetProcAddress(jvmDll, "JNI_GetCreatedJavaVMs");
     if (!getVMs) return 1;
 
-    // 3. Wait for a JavaVM to be created
+    // Wait for JavaVM.
     JavaVM *jvm = nullptr;
     jsize count = 0;
     for (int i = 0; i < 100 && count == 0; i++) {
@@ -75,77 +74,59 @@ static DWORD WINAPI AgentThread(LPVOID hMod)
     }
     if (!jvm || count == 0) return 1;
 
-    // 4. Get JVMTI environment
+    // Get JVMTI env.
     if (jvm->GetEnv((void **)&s_jvmti, JVMTI_VERSION_1_2) != JNI_OK) return 1;
 
-    // 5. Add agent.jar to the bootstrap classloader so Hooks/Modules are visible
-    //    to Minecraft's own classloader after retransformation.
+    // Add agent.jar to bootstrap so com.modloader.* is visible everywhere.
     if (s_jvmti->AddToBootstrapClassLoaderSearch(jarPath.c_str()) != JVMTI_ERROR_NONE)
         return 1;
 
-    // 6. Enable class-retransformation capability
+    // Enable retransform + redefine.
     jvmtiCapabilities caps = {};
     caps.can_retransform_classes = 1;
-    if (s_jvmti->AddCapabilities(&caps) != JVMTI_ERROR_NONE) return 1;
+    caps.can_redefine_classes    = 1;
+    s_jvmti->AddCapabilities(&caps);
 
-    // 7. Attach this thread to the JVM
+    // Register ClassFileLoadHook.
+    jvmtiEventCallbacks cbs = {};
+    cbs.ClassFileLoadHook = ClassFileLoadHook;
+    s_jvmti->SetEventCallbacks(&cbs, sizeof(cbs));
+
+    // Attach this thread to the JVM.
     JNIEnv *env = nullptr;
     JavaVMAttachArgs aa = {JNI_VERSION_1_8, (char *)"SystemClientAgent", nullptr};
     if (jvm->AttachCurrentThread((void **)&env, &aa) != JNI_OK) return 1;
 
-    // 8. Give Minecraft time to finish loading
+    // Wait for Minecraft to finish loading all classes.
     Sleep(6000);
 
-    // 9. Find HookTransformer (now on bootstrap path)
+    // Find HookTransformer (on bootstrap path).
     jclass tClass = env->FindClass("com/modloader/HookTransformer");
-    if (!tClass || env->ExceptionCheck()) {
-        env->ExceptionClear();
-        jvm->DetachCurrentThread();
-        return 1;
-    }
+    if (!tClass || env->ExceptionCheck()) { env->ExceptionClear(); jvm->DetachCurrentThread(); return 1; }
 
-    // Pre-load ASM classes before we register the JVMTI hook to avoid
-    // class-loading re-entrancy inside the ClassFileLoadHook callback.
+    // Preload all ASM + inner classes before any hook fires.
     jmethodID preloadMid = env->GetStaticMethodID(tClass, "preload", "()V");
     if (preloadMid && !env->ExceptionCheck())
         env->CallStaticVoidMethod(tClass, preloadMid);
     if (env->ExceptionCheck()) env->ExceptionClear();
 
-    // 10. Create HookTransformer instance and grab transform() method ID
+    // Create HookTransformer instance and get transform() method ID.
     jmethodID ctor = env->GetMethodID(tClass, "<init>", "()V");
-    jobject inst = env->NewObject(tClass, ctor);
-    if (!inst || env->ExceptionCheck()) {
-        env->ExceptionClear();
-        jvm->DetachCurrentThread();
-        return 1;
-    }
-    s_transformer  = env->NewGlobalRef(inst);
-    s_transformMid = env->GetMethodID(tClass, "transform",
+    jobject transformer = env->NewObject(tClass, ctor);
+    if (!transformer || env->ExceptionCheck()) { env->ExceptionClear(); jvm->DetachCurrentThread(); return 1; }
+    transformer = env->NewGlobalRef(transformer);
+
+    jmethodID transformMid = env->GetMethodID(tClass, "transform",
         "(Ljava/lang/ClassLoader;Ljava/lang/String;"
         "Ljava/lang/Class;Ljava/security/ProtectionDomain;[B)[B");
-    if (!s_transformMid || env->ExceptionCheck()) {
-        env->ExceptionClear();
-        jvm->DetachCurrentThread();
-        return 1;
-    }
+    if (!transformMid || env->ExceptionCheck()) { env->ExceptionClear(); jvm->DetachCurrentThread(); return 1; }
 
-    // 11. Register JVMTI ClassFileLoadHook
-    jvmtiEventCallbacks cbs = {};
-    cbs.ClassFileLoadHook = ClassFileLoadHook;
-    s_jvmti->SetEventCallbacks(&cbs, sizeof(cbs));
-    s_jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr);
-
-    // 12. Resolve target class names from ObfNames
+    // Resolve target class jclass handles via ObfNames.
     jclass obf = env->FindClass("com/modloader/ObfNames");
-    if (!obf || env->ExceptionCheck()) {
-        env->ExceptionClear();
-        s_jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr);
-        jvm->DetachCurrentThread();
-        return 1;
-    }
+    if (!obf || env->ExceptionCheck()) { env->ExceptionClear(); jvm->DetachCurrentThread(); return 1; }
 
-    const char *ownerFields[] = {"onTick_OWNER", "onHud_OWNER", "onKey_OWNER", nullptr};
     std::vector<jclass> targets;
+    const char *ownerFields[] = {"onTick_OWNER", "onHud_OWNER", "onKey_OWNER", nullptr};
     for (int i = 0; ownerFields[i]; i++) {
         jfieldID fid = env->GetStaticFieldID(obf, ownerFields[i], "Ljava/lang/String;");
         if (!fid || env->ExceptionCheck()) { env->ExceptionClear(); continue; }
@@ -159,18 +140,54 @@ static DWORD WINAPI AgentThread(LPVOID hMod)
         targets.push_back((jclass)env->NewGlobalRef(cls));
         env->DeleteLocalRef(cls);
     }
+    if (targets.empty()) { jvm->DetachCurrentThread(); return 1; }
 
-    // 13. Retransform the 3 Minecraft classes to inject our hooks
-    if (!targets.empty()) {
-        s_jvmti->RetransformClasses((jint)targets.size(), targets.data());
+    // ── PHASE 1: capture original bytecode (pure C callback, no Java) ────────
+    g_phase = 1;
+    s_jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr);
+    s_jvmti->RetransformClasses((jint)targets.size(), targets.data());
+    s_jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr);
+    g_phase = 0;
+    if (env->ExceptionCheck()) env->ExceptionClear();
+
+    // ── Transform on agent thread (no JVMTI locks held) ──────────────────────
+    for (auto &kv : g_captured) {
+        const std::string &name  = kv.first;
+        const auto        &bytes = kv.second;
+        if (bytes.empty()) continue;
+
+        jbyteArray inArr = env->NewByteArray((jint)bytes.size());
+        if (!inArr) continue;
+        env->SetByteArrayRegion(inArr, 0, (jint)bytes.size(), (const jbyte *)bytes.data());
+        jstring nameStr = env->NewStringUTF(name.c_str());
+
+        jbyteArray result = (jbyteArray)env->CallObjectMethod(
+            transformer, transformMid,
+            nullptr, nameStr, nullptr, nullptr, inArr);
+
+        if (!env->ExceptionCheck() && result) {
+            jint len = env->GetArrayLength(result);
+            std::vector<unsigned char> out(len);
+            env->GetByteArrayRegion(result, 0, len, (jbyte *)out.data());
+            g_transformed[name] = std::move(out);
+            env->DeleteLocalRef(result);
+        }
         if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(inArr);
+        env->DeleteLocalRef(nameStr);
     }
+
+    // ── PHASE 2: retransform again, returning pre-computed bytes (pure C) ────
+    g_phase = 2;
+    s_jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr);
+    s_jvmti->RetransformClasses((jint)targets.size(), targets.data());
+    s_jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr);
+    g_phase = 0;
+    if (env->ExceptionCheck()) env->ExceptionClear();
+
     for (auto c : targets) env->DeleteGlobalRef(c);
 
-    // 14. Disable hook — retransformation is done
-    s_jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr);
-
-    // 15. Call Agent.start() to enable Hooks.active and start IPC thread
+    // Start command listener and enable hooks.
     jclass agCls = env->FindClass("com/modloader/Agent");
     if (agCls && !env->ExceptionCheck()) {
         jmethodID startMid = env->GetStaticMethodID(agCls, "start", "()V");
