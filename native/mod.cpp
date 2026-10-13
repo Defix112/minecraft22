@@ -16,6 +16,17 @@
 #include <vector>
 #include <sstream>
 
+// ── Dynamic JVM loading (avoids linking against jvm.lib) ─────────────────────────────
+typedef jint (JNICALL *PFN_GetCreatedJavaVMs)(JavaVM**, jsize, jsize*);
+static jint GetCreatedJVMs(JavaVM** vms, jsize bufLen, jsize* nVMs) {
+    HMODULE jvm = GetModuleHandleW(L"jvm.dll");
+    if (!jvm) jvm = LoadLibraryW(L"jvm.dll");
+    if (!jvm) return JNI_ERR;
+    PFN_GetCreatedJavaVMs fn = (PFN_GetCreatedJavaVMs)GetProcAddress(jvm, "JNI_GetCreatedJavaVMs");
+    if (!fn) return JNI_ERR;
+    return fn(vms, bufLen, nVMs);
+}
+
 // ── Global state ─────────────────────────────────────────────────────────────────────────────
 static HINSTANCE  g_hInst     = nullptr;
 static HWND       g_overlay   = nullptr;  // our transparent window
@@ -283,17 +294,15 @@ static void RequestToggle(const std::string& name) {
     SetStaticStr(env, g_gsClass, "pendingToggle", name.c_str());
 }
 
-// ── Key input handler (runs in main thread message pump) ─────────────────────────────────────────
+// ── Key input handler ────────────────────────────────────────────────────────────────────────────────────────
 static void HandleKey(int vk) {
     if (vk == VK_DELETE) {
-        // Panic — works regardless of overlay state
         JNIEnv* env = GetEnv();
         if (env && g_gsClass) SetStaticBool(env, g_gsClass, "panicRequested", true);
         return;
     }
     if (vk == VK_INSERT) {
         g_guiOpen = !g_guiOpen;
-        // When GUI open: remove WS_EX_TRANSPARENT so mouse clicks work
         LONG_PTR ex = GetWindowLongPtrA(g_overlay, GWL_EXSTYLE);
         if (g_guiOpen) ex &= ~WS_EX_TRANSPARENT;
         else           ex |=  WS_EX_TRANSPARENT;
@@ -317,10 +326,9 @@ static void HandleKey(int vk) {
 
 // ── Main DLL thread ─────────────────────────────────────────────────────────────────────────────────────
 static DWORD WINAPI ModThread(LPVOID) {
-    // Wait for JVM
     for (int i = 0; i < 200; i++) {
         jsize count = 0;
-        JNI_GetCreatedJavaVMs(&g_jvm, 1, &count);
+        GetCreatedJVMs(&g_jvm, 1, &count);
         if (count > 0) break;
         Sleep(200);
     }
@@ -329,7 +337,6 @@ static DWORD WINAPI ModThread(LPVOID) {
     JNIEnv* env = GetEnv();
     if (!env) return 1;
 
-    // Wait for agent to load (GameState.active = true)
     for (int i = 0; i < 100; i++) {
         g_gsClass = env->FindClass("com/modloader/GameState");
         if (g_gsClass) {
@@ -341,7 +348,6 @@ static DWORD WINAPI ModThread(LPVOID) {
     }
     if (!g_gsClass) return 1;
 
-    // Wait for Minecraft window
     for (int i = 0; i < 60; i++) {
         g_mcWindow = FindMcWindow();
         if (g_mcWindow) break;
@@ -351,26 +357,20 @@ static DWORD WINAPI ModThread(LPVOID) {
     CreateOverlay();
     UpdateOverlayGeometry();
 
-    // Key state tracking
     bool keyState[256] = {};
 
-    // Message + render loop
     while (g_running && g_overlay) {
-        // Update overlay position to match MC window
         if (g_mcWindow) UpdateOverlayGeometry();
 
-        // Poll keys
         for (int vk : {VK_DELETE, VK_INSERT, VK_UP, VK_DOWN, VK_RETURN, VK_SPACE}) {
             bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
             if (down && !keyState[vk]) HandleKey(vk);
             keyState[vk] = down;
         }
 
-        // Refresh overlay every ~50ms
         InvalidateRect(g_overlay, nullptr, FALSE);
         UpdateWindow(g_overlay);
 
-        // Process messages
         MSG msg;
         while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) { g_running = false; break; }
