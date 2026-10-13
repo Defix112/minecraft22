@@ -43,6 +43,21 @@ public final class Hooks {
             }
             shiftWasDown = shiftDown;
             ModuleManager.tick(mc);
+            // Update state for C++ overlay
+            net.minecraft.world.entity.player.Player p = mc.player;
+            if (p != null) {
+                GameState.playerX = p.getX();
+                GameState.playerY = p.getY();
+                GameState.playerZ = p.getZ();
+            }
+            GameState.moduleStates = ModuleManager.moduleStates();
+            GameState.active = true;
+            // Handle toggle request from C++ overlay
+            String tog = GameState.pendingToggle;
+            if (!tog.isEmpty()) {
+                GameState.pendingToggle = "";
+                ModuleManager.toggle(tog);
+            }
         } catch (Throwable t) {
             Agent.logError("onTick", t);
         }

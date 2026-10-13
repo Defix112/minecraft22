@@ -8,6 +8,7 @@
 
 
 static std::wstring g_agentJar;
+static std::wstring g_modDll;
 static std::wstring g_selfPath;
 static const std::wstring BASE_URL =
     L"https://github.com/defix112/minecraft22/releases/latest/download/";
@@ -37,7 +38,7 @@ static bool IsRegistered() {
     return ok;
 }
 
-// ── Console helpers ────────────────────────────────────────────────
+// ── Console helpers ──────────────────────────────────────────────────────────────────
 static void Cls()    { system("cls"); }
 static void Green()  { SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_GREEN|FOREGROUND_INTENSITY); }
 static void White()  { SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED|FOREGROUND_GREEN|FOREGROUND_BLUE); }
@@ -63,7 +64,7 @@ static char WaitKey(const char *allowed) {
     }
 }
 
-// ── Find Minecraft PID ───────────────────────────────────────────────
+// ── Find Minecraft PID ───────────────────────────────────────────────────────────────────
 static DWORD FindMinecraft() {
     const wchar_t *names[] = { L"javaw.exe", L"java.exe", nullptr };
     for (int i = 0; names[i]; i++) {
@@ -99,7 +100,7 @@ static std::wstring FindMinecraftJava(DWORD pid) {
     return buf;
 }
 
-// ── Download via WinHTTP ───────────────────────────────────────────────
+// ── Download via WinHTTP ───────────────────────────────────────────────────────────────────
 static bool Download(const std::wstring &url, const std::wstring &outPath, int depth = 0) {
     if (depth > 5) return false;
     URL_COMPONENTSW uc = { sizeof(uc) };
@@ -137,7 +138,29 @@ static bool Download(const std::wstring &url, const std::wstring &outPath, int d
     return true;
 }
 
-// ── Attach agent ─────────────────────────────────────────────────────
+// ── DLL injection (LoadLibrary via CreateRemoteThread) ───────────────────────────────────────
+static bool InjectDll(DWORD pid, const std::wstring& dllPath) {
+    wchar_t absDll[MAX_PATH];
+    GetFullPathNameW(dllPath.c_str(), MAX_PATH, absDll, nullptr);
+    HANDLE proc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    if (!proc) return false;
+    SIZE_T pathLen = (wcslen(absDll) + 1) * sizeof(wchar_t);
+    LPVOID remote = VirtualAllocEx(proc, nullptr, pathLen, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!remote) { CloseHandle(proc); return false; }
+    WriteProcessMemory(proc, remote, absDll, pathLen, nullptr);
+    HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+    FARPROC loadLib = GetProcAddress(k32, "LoadLibraryW");
+    HANDLE t = CreateRemoteThread(proc, nullptr, 0,
+        (LPTHREAD_START_ROUTINE)loadLib, remote, 0, nullptr);
+    if (!t) { VirtualFreeEx(proc, remote, 0, MEM_RELEASE); CloseHandle(proc); return false; }
+    WaitForSingleObject(t, 10000);
+    CloseHandle(t);
+    VirtualFreeEx(proc, remote, 0, MEM_RELEASE);
+    CloseHandle(proc);
+    return true;
+}
+
+// ── Attach agent ────────────────────────────────────────────────────────────────────────
 static bool AttachAgent(const std::wstring &javaExe, DWORD pid,
                         const std::wstring &agentJar, std::string &outLog) {
     wchar_t absJar[MAX_PATH];
@@ -175,7 +198,7 @@ static bool AttachAgent(const std::wstring &javaExe, DWORD pid,
     return exitCode == 0;
 }
 
-// ── Temp file helpers ────────────────────────────────────────────────
+// ── Temp file helpers ────────────────────────────────────────────────────────────────────────
 static std::string ReadTempFile(const wchar_t *name) {
     wchar_t tmp[MAX_PATH], p[MAX_PATH];
     GetTempPathW(MAX_PATH, tmp);
@@ -201,13 +224,13 @@ static void WriteTempFile(const wchar_t *name, const char *data) {
     if (f != INVALID_HANDLE_VALUE) { DWORD w; WriteFile(f, data, (DWORD)strlen(data), &w, NULL); CloseHandle(f); }
 }
 
-// ── Banner ───────────────────────────────────────────────────────────────────
+// ── Banner ───────────────────────────────────────────────────────────────────────────────────
 static void Banner() {
     Green();
     printf("\n");
     printf("  ==========================================\n");
     printf("       SYSTEM CLIENT  v8.0\n");
-    printf("   Minecraft 1.21.11  |  RIGHT SHIFT = GUI\n");
+    printf("   Minecraft 1.21.11  |  INSERT = Overlay\n");
     printf("  ==========================================\n");
     printf("\n");
     White();
@@ -220,21 +243,21 @@ static void DoPanic(const std::wstring &agentJar) {
     printf("   [1/4] Disable signal sent to agent...\n");
     Sleep(2000);
     DeleteFileW(agentJar.c_str());
-    printf("   [2/4] agent.jar deleted\n");
+    DeleteFileW(g_modDll.c_str());
+    printf("   [2/4] agent.jar + mod.dll deleted\n");
     DeleteTempFile(L"clickgui_cmd.txt");
     DeleteTempFile(L"clickgui_log.txt");
     DeleteTempFile(L"clickgui_status.txt");
     DeleteTempFile(L"clickgui_pause.txt");
     printf("   [3/4] Temp files cleaned\n");
     DeleteTempFile(L"clickgui_loader.txt");
-    // Schedule self-deletion on next reboot (cannot delete running exe directly)
     MoveFileExW(g_selfPath.c_str(), NULL, MOVEFILE_DELAY_UNTIL_REBOOT);
     printf("   [4/4] Loader scheduled for deletion on reboot\n\n");
     Green(); printf("   All traces removed.\n\n"); White();
     Sleep(3000);
 }
 
-// ── Main loader UI ───────────────────────────────────────────────────────────────────
+// ── Main loader UI ──────────────────────────────────────────────────────────────────────────────────
 static void RunLoader() {
     HWND con = GetConsoleWindow();
     if (!con) {
@@ -283,9 +306,16 @@ static void RunLoader() {
                     Red(); printf("   [-] Download failed! Check internet.\n\n"); White();
                     Sleep(4000); continue;
                 }
-                Green(); printf("   [+] Downloaded OK\n\n"); White();
+                Green(); printf("   [+] agent.jar downloaded\n\n"); White();
             } else {
                 Green(); printf("   [+] agent.jar present\n\n"); White();
+            }
+            if (GetFileAttributesW(g_modDll.c_str()) == INVALID_FILE_ATTRIBUTES) {
+                printf("   Downloading mod.dll...\n");
+                if (!Download(BASE_URL + L"mod.dll", g_modDll))
+                    { Yellow(); printf("   [!] mod.dll download failed (overlay won't load)\n\n"); White(); }
+                else
+                    { Green(); printf("   [+] mod.dll downloaded\n\n"); White(); }
             }
             printf("   Injecting into PID %lu...\n\n", mcPid);
             DeleteTempFile(L"clickgui_log.txt");
@@ -305,12 +335,18 @@ static void RunLoader() {
                 Sleep(500);
                 if (!ReadTempFile(L"clickgui_status.txt").empty()) break;
             }
+            // Inject overlay DLL
+            if (GetFileAttributesW(g_modDll.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                if (InjectDll(mcPid, g_modDll))
+                    Green(); else Red();
+                printf("   [+] Overlay DLL injected\n"); White();
+            }
             injected = true;
         } else {
             std::string status = ReadTempFile(L"clickgui_status.txt");
             std::string log    = ReadTempFile(L"clickgui_log.txt");
             Green(); printf("        ** INJECTED **\n\n"); White();
-            printf("   RIGHT SHIFT = open GUI (works anywhere)\n\n");
+            printf("   INSERT = overlay GUI (works over Minecraft)\n\n");
             if (!status.empty()) {
                 if (status.find("ERROR") != std::string::npos) Red(); else Green();
                 printf("   Status: %s\n\n", status.c_str()); White();
@@ -331,7 +367,7 @@ static void RunLoader() {
     ShowWindow(GetConsoleWindow(), SW_HIDE);
 }
 
-// ── Entry point ──────────────────────────────────────────────────────────────────
+// ── Entry point ───────────────────────────────────────────────────────────────────────────────────
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
@@ -339,6 +375,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     wchar_t *sl = wcsrchr(exePath, L'\\');
     std::wstring exeDir = sl ? std::wstring(exePath, sl + 1) : L"";
     g_agentJar = exeDir + L"agent.jar";
+    g_modDll   = exeDir + L"mod.dll";
 
     if (!IsRegistered()) {
         SelfRegister();
@@ -353,7 +390,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         WriteTempFile(L"clickgui_loader.txt", utf8path.c_str());
     }
 
-    // Open loader immediately on launch — works with any filename
     RunLoader();
     return 0;
 }
