@@ -6,18 +6,13 @@
 #include <stdio.h>
 #include <string>
 
-#define HOTKEY_ID  1
-#define HOTKEY_ID2 2
-#define HOTKEY_ID3 3
-
 static std::wstring g_agentJar;
 static std::wstring g_selfPath;
 static const std::wstring BASE_URL =
     L"https://github.com/defix112/minecraft22/releases/latest/download/";
 
-// ── Self-registration: .lmr -> exe, startup entry ────────────────────
+// Self-registration: .lmr -> exe
 static void SelfRegister() {
-    // Register .lmr extension so double-click runs this file
     HKEY hk;
     if (RegCreateKeyExW(HKEY_CLASSES_ROOT, L".lmr", 0, NULL, 0,
                         KEY_SET_VALUE, NULL, &hk, NULL) == ERROR_SUCCESS) {
@@ -41,7 +36,7 @@ static bool IsRegistered() {
     return ok;
 }
 
-// ── Console helpers ──────────────────────────────────────────
+// Console helpers
 static void Cls()    { system("cls"); }
 static void Green()  { SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_GREEN|FOREGROUND_INTENSITY); }
 static void White()  { SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED|FOREGROUND_GREEN|FOREGROUND_BLUE); }
@@ -67,7 +62,7 @@ static char WaitKey(const char *allowed) {
     }
 }
 
-// ── Find Minecraft PID ───────────────────────────────────────────
+// Find Minecraft PID
 static DWORD FindMinecraft() {
     const wchar_t *names[] = { L"javaw.exe", L"java.exe", nullptr };
     for (int i = 0; names[i]; i++) {
@@ -103,7 +98,7 @@ static std::wstring FindMinecraftJava(DWORD pid) {
     return buf;
 }
 
-// ── Download via WinHTTP ───────────────────────────────────────────
+// Download via WinHTTP
 static bool Download(const std::wstring &url, const std::wstring &outPath, int depth = 0) {
     if (depth > 5) return false;
     URL_COMPONENTSW uc = { sizeof(uc) };
@@ -141,7 +136,7 @@ static bool Download(const std::wstring &url, const std::wstring &outPath, int d
     return true;
 }
 
-// ── Attach agent ────────────────────────────────────────────────────
+// Attach agent
 static bool AttachAgent(const std::wstring &javaExe, DWORD pid,
                         const std::wstring &agentJar, std::string &outLog) {
     wchar_t absJar[MAX_PATH];
@@ -179,7 +174,7 @@ static bool AttachAgent(const std::wstring &javaExe, DWORD pid,
     return exitCode == 0;
 }
 
-// ── Temp file helpers ────────────────────────────────────────────
+// Temp file helpers
 static std::string ReadTempFile(const wchar_t *name) {
     wchar_t tmp[MAX_PATH], p[MAX_PATH];
     GetTempPathW(MAX_PATH, tmp);
@@ -205,14 +200,13 @@ static void WriteTempFile(const wchar_t *name, const char *data) {
     if (f != INVALID_HANDLE_VALUE) { DWORD w; WriteFile(f, data, (DWORD)strlen(data), &w, NULL); CloseHandle(f); }
 }
 
-// ── Banner ───────────────────────────────────────────────────────────
+// Banner
 static void Banner() {
     Green();
     printf("\n");
     printf("  ==========================================\n");
     printf("       SYSTEM CLIENT  v8.0\n");
     printf("   Minecraft 1.21.11  |  RIGHT SHIFT = GUI\n");
-    printf("   Open loader: Ctrl+U  /  Alt+F1  /  F12\n");
     printf("  ==========================================\n");
     printf("\n");
     White();
@@ -236,7 +230,7 @@ static void DoPanic(const std::wstring &agentJar) {
     Sleep(3000);
 }
 
-// ── Main loader UI ────────────────────────────────────────────────────
+// Main loader UI
 static void RunLoader() {
     HWND con = GetConsoleWindow();
     if (!con) {
@@ -333,7 +327,7 @@ static void RunLoader() {
     ShowWindow(GetConsoleWindow(), SW_HIDE);
 }
 
-// ── Entry point ───────────────────────────────────────────────────────
+// Entry point
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
@@ -346,26 +340,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         SelfRegister();
     }
 
-    // Register 3 hotkeys: Ctrl+U, Alt+F1, F12 — at least one must work
-    bool hk1 = RegisterHotKey(NULL, HOTKEY_ID,  MOD_CONTROL | MOD_NOREPEAT, 'U');
-    bool hk2 = RegisterHotKey(NULL, HOTKEY_ID2, MOD_ALT     | MOD_NOREPEAT, VK_F1);
-    bool hk3 = RegisterHotKey(NULL, HOTKEY_ID3, MOD_NOREPEAT,               VK_F12);
-    if (!hk1 && !hk2 && !hk3) {
-        // All hotkeys blocked — open directly
-        RunLoader();
-        return 0;
-    }
-
-    MSG msg;
-    while (GetMessageW(&msg, NULL, 0, 0)) {
-        if (msg.message == WM_HOTKEY &&
-            (msg.wParam == HOTKEY_ID || msg.wParam == HOTKEY_ID2 || msg.wParam == HOTKEY_ID3))
-            RunLoader();
-        DispatchMessageW(&msg);
-    }
-
-    if (hk1) UnregisterHotKey(NULL, HOTKEY_ID);
-    if (hk2) UnregisterHotKey(NULL, HOTKEY_ID2);
-    if (hk3) UnregisterHotKey(NULL, HOTKEY_ID3);
+    // Open loader immediately on launch — works with any filename
+    RunLoader();
     return 0;
 }
