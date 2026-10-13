@@ -45,7 +45,7 @@ jobs:
           x86_64-w64-mingw32-g++ -O2 -static \
             -o out/loader.exe native/loader.cpp \
             -lwinhttp -lshlwapi -lkernel32 -luser32 \
-            -municode -mconsole
+            -mconsole
 
       - name: Publish to Releases
         env:
