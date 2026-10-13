@@ -10,28 +10,47 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.jar.JarFile;
 
 public class Agent {
 
-    private static final File TMP = new File(System.getProperty("java.io.tmpdir"));
-    private static final File LOG = new File(TMP, "clickgui_log.txt");
+    private static final File TMP    = new File(System.getProperty("java.io.tmpdir"));
+    private static final File LOG    = new File(TMP, "clickgui_log.txt");
     private static final File STATUS = new File(TMP, "clickgui_status.txt");
-    private static final File CMD = new File(TMP, "clickgui_cmd.txt");
+    private static final File CMD    = new File(TMP, "clickgui_cmd.txt");
 
-    private static final Set<String> reportedErrors = ConcurrentHashMap.newKeySet();
-    private static final List<Class<?>> hookedClasses = new ArrayList<>();
+    private static final Set<String>   reportedErrors = ConcurrentHashMap.newKeySet();
+    private static final List<Class<?>> hookedClasses  = new ArrayList<>();
 
-    private static volatile boolean loaded;
-    private static Instrumentation inst;
-    private static HookTransformer transformer;
+    private static volatile boolean   loaded;
+    private static Instrumentation    inst;
+    private static HookTransformer    transformer;
 
-    // Classic Java agent path (via java.exe attach)
     public static void agentmain(String args, Instrumentation instrumentation) {
-        if (loaded) { log("Already injected"); return; }
+        if (loaded) {
+            log("Already injected");
+            return;
+        }
         loaded = true;
-        inst = instrumentation;
-        log("Agent loaded via Java attach");
+        inst   = instrumentation;
+        log("Agent loaded");
         try {
+            // Put agent.jar on the bootstrap classloader so com.modloader.*
+            // is visible from Minecraft's isolated classloader after bytecode injection.
+            // loadAgent() only adds to the system classloader, which Minecraft
+            // may not delegate to for unknown packages.
+            try {
+                java.security.CodeSource cs =
+                    Agent.class.getProtectionDomain().getCodeSource();
+                if (cs != null && cs.getLocation() != null) {
+                    File jar = new File(cs.getLocation().toURI());
+                    inst.appendToBootstrapClassLoaderSearch(new JarFile(jar));
+                    log("Bootstrap: " + jar.getName());
+                }
+            } catch (Throwable t) {
+                logError("bootstrap", t);
+            }
+
             transformer = new HookTransformer();
             inst.addTransformer(transformer, true);
 
@@ -52,34 +71,11 @@ public class Agent {
         }
     }
 
-    // DLL injection path: called from agent.dll after JVMTI already retransformed classes.
-    public static void start() {
-        if (loaded) { log("Already loaded"); return; }
-        loaded = true;
-        log("Agent started via DLL injection");
-        try {
-            Hooks.active = true;
-            writeStatus("READY - press RIGHT SHIFT in game");
-            log("READY - press RIGHT SHIFT in game");
-            startCommandListener();
-        } catch (Throwable t) {
-            logError("start", t);
-            writeStatus("ERROR - see log");
-        }
-    }
-
-    // Retransforming without our transformer restores the original game bytecode.
     static void unhook() {
         try {
-            if (inst != null && transformer != null && !hookedClasses.isEmpty()) {
-                inst.removeTransformer(transformer);
-                inst.retransformClasses(hookedClasses.toArray(new Class<?>[0]));
-                log("Hooks removed, game code restored");
-            } else {
-                // DLL path: hooks stay in bytecode but active=false disables them
-                Hooks.active = false;
-                log("Hooks disabled (DLL mode)");
-            }
+            inst.removeTransformer(transformer);
+            inst.retransformClasses(hookedClasses.toArray(new Class<?>[0]));
+            log("Hooks removed, game code restored");
         } catch (Throwable t) {
             logError("unhook", t);
         }
